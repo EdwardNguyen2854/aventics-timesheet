@@ -4,7 +4,7 @@ import {type Entry, type Task, type TaskEffortRow} from './db.js';
 
 type TaskImport=Omit<Task,'updated_at'>;
 type EntryImport=Pick<Entry,'date'|'task_id'|'kind'|'role'|'hours'|'note'>&{user_id:string};
-export interface ImportPreview {mode:'tasks'|'effort';rows:number;tasks:TaskImport[];entries:EntryImport[];errors:string[];warnings:string[];present_task_fields?:string[]}
+export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:TaskImport[];entries:EntryImport[];errors:string[];warnings:string[];present_task_fields?:string[]}
 /** Exact 32-column Task Tracking layout. The two total columns and role actuals are computed in the app. */
 export const TRACKING_COLUMNS:ReadonlyArray<{header:string;key:keyof TaskImport|'total_estimated'|'total_actual';kind:'text'|'number'|'date'|'calculated'}>=[
  {header:'Serial no.',key:'serial_no',kind:'text'},{header:'Project ID',key:'ip_no',kind:'text'},
@@ -172,17 +172,26 @@ function parseDetailedEffort(ws:ExcelJS.Worksheet,result:ImportPreview,actorId:s
    result.entries.push({date,user_id,task_id,kind,role,hours,note});
  }
 }
-export async function parseWorkbook(buffer:Buffer,mode:'tasks'|'effort',actorId:string,isAdmin:boolean):Promise<ImportPreview>{
+export async function parseWorkbook(buffer:Buffer,mode:'tasks'|'effort'|'workbook',actorId:string,isAdmin:boolean):Promise<ImportPreview>{
  const wb=new ExcelJS.Workbook();await wb.xlsx.load(buffer as any);
  const result:ImportPreview={mode,rows:0,tasks:[],entries:[],errors:[],warnings:[]};
- const ws=mode==='tasks'?(wb.getWorksheet('Task Tracking')||wb.getWorksheet('Tasks')||wb.worksheets[0]):
-   (wb.getWorksheet('Timesheet')||wb.getWorksheet('Effort')||wb.worksheets[0]);
- if(!ws){result.errors.push('Workbook has no worksheets');return result;}
- if(mode==='tasks')parseTasks(ws,result);
- else if(!parseWideEffort(ws,result,actorId,isAdmin))parseDetailedEffort(ws,result,actorId,isAdmin);
- if(ws.rowCount>10_015)result.errors.push('Workbook exceeds 10,000 data rows');
+
+ const taskSheet=wb.getWorksheet('Task Tracking')||wb.getWorksheet('Tasks');
+ const timeSheet=wb.getWorksheet('Timesheet')||wb.getWorksheet('Effort');
+ if(mode==='workbook'){
+   if(!taskSheet||!timeSheet){result.errors.push('Full import requires Task Tracking and Timesheet sheets');return result;}
+   parseTasks(taskSheet,result);
+   if(!parseWideEffort(timeSheet,result,actorId,isAdmin))parseDetailedEffort(timeSheet,result,actorId,isAdmin);
+   if(taskSheet.rowCount>10_015||timeSheet.rowCount>10_015)result.errors.push('Workbook exceeds 10,000 data rows');
+ }else{
+   const ws=mode==='tasks'?(taskSheet||wb.worksheets[0]):(timeSheet||wb.worksheets[0]);
+   if(!ws){result.errors.push('Workbook has no worksheets');return result;}
+   if(mode==='tasks')parseTasks(ws,result);
+   else if(!parseWideEffort(ws,result,actorId,isAdmin))parseDetailedEffort(ws,result,actorId,isAdmin);
+   if(ws.rowCount>10_015)result.errors.push('Workbook exceeds 10,000 data rows');
+ }
  if(result.rows===0)result.warnings.push('No data rows found');
- if(mode==='effort'&&ws.name==='Timesheet')result.warnings.push('Grid import has no Note column. Cells with existing dated notes must be edited individually; they are protected from overwrite.');
+ if(mode!=='tasks'&&timeSheet?.name==='Timesheet')result.warnings.push('Grid import has no Note column; existing detailed notes remain protected.');
  return result;
 }
 function title(ws:ExcelJS.Worksheet,headers:string[],frozen=0):void {

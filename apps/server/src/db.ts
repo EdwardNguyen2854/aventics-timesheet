@@ -99,9 +99,9 @@ export function verifyPassword(pass:string,hashed:string):boolean {
   const actual=scryptSync(pass,salt,64),expected=Buffer.from(hash,'hex');
   return actual.length===expected.length && timingSafeEqual(actual,expected);
 }
-export function createUser(input:{id:string;name:string;password:string;is_admin?:boolean}):User {
+export function createUser(input:{id:string;name:string;password:string;is_admin?:boolean;active?:boolean}):User {
   const id=safeSlug(input.id);if(id!==input.id||input.password.length<12)throw new Error('Username must be a safe slug and password at least 12 characters');
-  central.prepare('INSERT INTO users(id,name,password_hash,is_admin) VALUES(?,?,?,?)').run(id,input.name.trim(),passwordHash(input.password),input.is_admin?1:0);
+  central.prepare('INSERT INTO users(id,name,password_hash,is_admin,active) VALUES(?,?,?,?,?)').run(id,input.name.trim(),passwordHash(input.password),input.is_admin?1:0,input.active===false?0:1);
   userDb(id);return central.prepare('SELECT id,name,is_admin,active,created_at FROM users WHERE id=?').get(id) as User;
 }
 export function bootstrap():void {
