@@ -3,6 +3,7 @@ import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,P
 import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview,type EffortRate,type WorkEstimate,type TrackingMark,TRACKING_COLUMNS,daysOfYear} from './api';
 import {TaskWorkspace} from './TaskWorkspace';
 import {PerformancePage} from './PerformancePage';
+import {WorkGrid,type GridCoordinate} from './WorkGrid';
 
 type Page='overview'|'timesheet'|'tasks'|'estimation'|'performance'|'team'|'exchange'|'admin';
 const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['estimation','Estimation & Lookup',Calculator],['performance','Performance Analytics',LayoutDashboard],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
@@ -107,7 +108,7 @@ function EntryEditor({overview,selectedUser,initialDate,onSaved,onClose}:{overvi
  <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy?'Saving…':'Save effort'}</button></div></form></section></div>;
 }
 interface GridRow {key:string;userId:string;status:string;taskId:string;kind:string;role:string;entries:Entry[]}
-function TimesheetPage({overview,selectedUser,onUser,refresh,flash}:{overview:Overview;selectedUser:string;onUser:(id:string)=>void;refresh:()=>void;flash:(s:string)=>void}){
+function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{overview:Overview;selectedUser:string;onUser:(id:string)=>void;refresh:()=>void;flash:(s:string)=>void;onOpenTask:(taskId:string)=>void}){
  const [year,setYear]=useState(new Date().getFullYear()),[period,setPeriod]=useState('all');
  const [yearEntries,setYearEntries]=useState<Entry[]>([]),[rangeBusy,setRangeBusy]=useState(false),[rangeError,setRangeError]=useState('');
  const days=useMemo(()=>period==='all'?daysOfYear(year):daysOfMonth(String(year)+'-'+period),[year,period]);
@@ -184,6 +185,20 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash}:{overview:Ov
    try{await api<{updated:number}>('/effort-cells',{method:'POST',body:JSON.stringify({cells})});flash(`${cells.length} cells pasted`);refresh();}
    catch(error){setErr((error as Error).message);}finally{saving.current.delete(pasteKey);}
  }
+ async function pasteVirtual(start:GridCoordinate,text:string){
+  const lines=text.replace(/\r/g,'').replace(/\n$/,'').split('\n').map(line=>line.split('\t'));
+  const batch:Array<{user_id:string;date:string;task_id:string;kind:string;role:string;hours:number}>=[];
+  for(let r=0;r<lines.length;r++)for(let c=0;c<(lines[r]?.length||0);c++){
+   const row=rows[start.row+r],date=days[start.day+c];
+   if(!row||!date){setErr('Paste exceeds the visible grid. No changes were applied.');return;}
+   const raw=(lines[r]?.[c]||'').trim().replace(',','.'),hours=raw?Number(raw):0;
+   if(!Number.isFinite(hours)||hours<0||hours>24||Math.round(hours*4)!==hours*4){setErr('Invalid pasted effort at row '+(r+1));return;}
+   batch.push({user_id:row.userId,date,task_id:row.taskId,kind:row.kind,role:row.role,hours});
+  }
+  if(batch.length>1000){setErr('Paste limit is 1,000 cells. Split into smaller ranges.');return;}
+  try{await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:batch})});flash(`${batch.length} cells saved`);refresh();}
+  catch(e){setErr((e as Error).message);}
+ }
  function move(cell:{key:string;date:string;draft:string},event:KeyboardEvent<HTMLInputElement>){
    if(event.key==='Escape'){event.preventDefault();setActive(null);return;}
    if(!['Enter','Tab'].includes(event.key))return;
@@ -218,35 +233,18 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash}:{overview:Ov
    <button className="btn small" onClick={addRow}><Plus size={13}/>Add row</button>
  </div>}
  <section className="panel"><div className="panel-header"><h2>{period==='all'?'Full-year effort grid':'Monthly effort grid'}</h2><span className="subtle">{period==='all'?'All months · '+year:year+'-'+period} · frozen task columns · scroll horizontally</span></div>
- <div className="timesheet-scroll" tabIndex={0} aria-label="Scrollable timesheet"><table className="timegrid excel-grid"><thead><tr>
-   <th className="excel-meta col-engineer" rowSpan={2}>Engineer</th><th className="excel-meta col-status" rowSpan={2}>Status</th>
-   <th className="excel-meta col-task" rowSpan={2}>Task ID</th><th className="excel-meta col-role" rowSpan={2}>Role</th><th className="excel-meta col-sum" rowSpan={2}>Total</th>
-   {days.map(d=><th key={d} className={`day-head ${isWeekend(d)?'weekend':''} ${dayTotal(d)>0?'logged-day':''}`}>{new Date(d+'T00:00:00').toLocaleDateString('en',{weekday:'short'})}</th>)}
- </tr><tr>{days.map(d=><th key={d} className={`date-head ${isWeekend(d)?'weekend':''} ${dayTotal(d)>0?'logged-day':''} ${d.endsWith('-01')?'first-of-month':''}`} title={d.slice(8)+'.'+d.slice(5,7)+'.'+d.slice(0,4)}>{d.slice(-2)}{d.endsWith('-01')&&<small>{new Date(d+'T00:00:00').toLocaleDateString('en',{month:'short'})}</small>}</th>)}</tr></thead>
- <tbody><tr className="day-total-row"><td className="excel-meta col-engineer">TOTAL</td><td className="excel-meta col-status"/><td className="excel-meta col-task"/><td className="excel-meta col-role"/><td className="excel-meta col-sum num">{fmtHours(sum(entries))}</td>
-   {days.map(d=><td key={d} className={`day-cell ${dayTotal(d)>0?'has-effort heat-'+heat(dayTotal(d)):isWeekend(d)?'weekend':''}`}><span className="day-total">{dayTotal(d)?fmtHours(dayTotal(d)):'·'}</span></td>)}
- </tr>
- {rows.map(row=><tr key={row.key}>
-   <td className="excel-meta col-engineer"><strong>{userMap.get(row.userId)?.name||row.userId}</strong></td>
-   <td className="excel-meta col-status" title={row.status}><Status value={row.status}/></td>
-   <td className="excel-meta col-task mono" title={row.taskId||row.kind}>{row.taskId||row.kind}</td>
-   <td className="excel-meta col-role">{row.role}</td><td className="excel-meta col-sum num strong">{fmtHours(sum(row.entries))}</td>
-   {days.map(date=>{const records=entriesFor(row,date),value=sum(records),isActive=active?.key===row.key&&active.date===date;
-     return <td className={`day-cell ${value>0?'has-effort heat-'+heat(value):isWeekend(date)?'weekend':''} ${editMode?'editable-day':''}`} key={date}>
-       {isActive?<input autoFocus aria-label={`Edit ${row.userId} ${row.taskId||row.kind} ${date}`} className="excel-input" inputMode="decimal" value={active!.draft}
-         onFocus={e=>e.target.select()} onChange={e=>setActive(v=>v?{...v,draft:e.target.value}:v)}
-         onBlur={()=>void commitCell(active!)} onKeyDown={event=>move(active!,event)} onPaste={e=>void pasteCells(e,active!)}/>
-       :<button className={`excel-cell ${value>0?'has-effort heat-'+heat(value):''} ${records.length>1?'multi-note':''}`}
-         title={records.length>1?'Multiple notes: view details to edit':`${row.userId} · ${date} · ${fmtHours(value)}h`}
-         onClick={()=>editMode?(records.length>1?setErr('Multiple records in this cell. Exit edit mode and view details.'):setActive({key:row.key,date,draft:value?fmtHours(value):''})):
-           (records.length?setDetails({entries:records,userId:row.userId}):setEntryModal({userId:row.userId,date}))}>
-         {value?fmtHours(value):editMode?'': '·'}
-       </button>}
-     </td>;
-   })}
- </tr>)}
- {!rows.length&&<tr><td className="empty" colSpan={days.length+5}>No entries yet. {editMode?'Choose a task and Add row.':'Select Log effort or import a workbook.'}</td></tr>}
- </tbody></table></div>
+ <WorkGrid days={days} rows={rows} userNames={new Map(users.map(u=>[u.id,u.name]))} dailyTotals={daily} valueAt={valueFor}
+   editable={editMode} onTaskOpen={onOpenTask} onPasteRange={(start,text)=>void pasteVirtual(start,text)}
+   renderCell={(row,date)=>{
+    const records=entriesFor(row,date),value=sum(records),isActive=active?.key===row.key&&active.date===date;
+    return isActive?<input autoFocus aria-label={`Edit ${row.userId} ${row.taskId||row.kind} ${date}`} className="excel-input" inputMode="decimal" value={active!.draft}
+       onFocus={e=>e.target.select()} onChange={e=>setActive(v=>v?{...v,draft:e.target.value}:v)}
+       onBlur={()=>void commitCell(active!)} onKeyDown={event=>move(active!,event)} onPaste={e=>void pasteCells(e,active!)}/>
+     :<button className="wt-hour-button" title={`${row.userId} · ${date} · ${fmtHours(value)}h`}
+       onClick={()=>editMode?(records.length>1?setErr('Multiple records: edit details individually'):setActive({key:row.key,date,draft:value?fmtHours(value):''})):
+         (records.length?setDetails({entries:records,userId:row.userId}):setEntryModal({userId:row.userId,date}))}>
+       {value?fmtHours(value):'·'}</button>;
+   }}/>
  <div className="table-footer"><span>Logged hours:</span><span className="heat-legend heat-1">0.25–2h</span><span className="heat-legend heat-2">2–4h</span><span className="heat-legend heat-3">4–6h</span><span className="heat-legend heat-4">6–8h</span><span className="heat-legend heat-5">8h+</span>{editMode&&<span>Each change is saved to the server; cells with multiple notes are protected.</span>}</div>
  </section>
  {details&&<div className="modal-backdrop" onClick={()=>setDetails(null)}><section className="modal" role="dialog" aria-modal="true" onClick={e=>e.stopPropagation()}><div className="panel-header"><h2>Logged records · {details.entries[0]?.date}</h2><button className="icon-btn" aria-label="Close" onClick={()=>setDetails(null)}><X size={15}/></button></div><div className="panel-body">{details.entries.map(e=><div key={e.id} className="entry-detail"><div><strong>{fmtHours(e.hours)} h · {e.role==='NA'?e.kind:e.role}</strong><small>{e.note||e.task_id||'No note'}</small></div><button className="btn small" onClick={()=>void removeEntry(e,details.userId)}><Trash2 size={13}/>Delete</button></div>)}<div className="modal-actions"><button className="btn" onClick={()=>setDetails(null)}>Close</button><button className="btn primary" onClick={()=>{setEntryModal({date:details.entries[0]?.date||today(),userId:details.userId});setDetails(null);}}>Add entry</button></div></div></section></div>}
@@ -659,7 +657,7 @@ export default function App(){
  {notice&&<Notice message={notice} onClose={()=>setNotice('')}/>} {error&&<div className="error-msg">{error}</div>}
  {!overview?<div className="empty large">{loading?'Loading team data…':'No data available.'}</div>:<>
  {page==='overview'&&<OverviewPage overview={overview} month={month} onGo={setPage}/>}
- {page==='timesheet'&&<TimesheetPage overview={overview} selectedUser={selectedUser} onUser={setSelectedUser} refresh={()=>void refresh()} flash={flash}/>}
+ {page==='timesheet'&&<TimesheetPage overview={overview} selectedUser={selectedUser} onUser={setSelectedUser} refresh={()=>void refresh()} flash={flash} onOpenTask={setOpenTaskId}/>}
  {page==='tasks'&&<TasksPage overview={overview} onRefresh={()=>void refresh()} flash={flash} month={month} onOpenTask={setOpenTaskId}/>}
   {page==='performance'&&<PerformancePage revision={overview.entries.length+overview.tasks.length}/>}
   {page==='estimation'&&<EstimationPage overview={overview} onRefresh={()=>void refresh()} flash={flash}/>}
