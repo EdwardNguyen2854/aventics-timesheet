@@ -22,7 +22,7 @@ export const TRACKING_COLUMNS:{header:string;key:keyof Task|'total_estimated'|'t
  ['Type of task','task_type','text'],['Code no. ADD','code_add','text'],['Code no. UPDATE','code_update','text'],
  ['Total Estimation Effort','total_estimated','calculated'],['Total Actual effort','total_actual','calculated'],
  ['MU-Execution','mu_execution','number'],['MU-QC','mu_qc','number']
-].map(([header,key,type])=>({header,key:key as keyof Task|'total_estimated'|'total_actual',type:type as 'text'|'number'|'date'|'calculated'}));
+].map(([header,key,type])=>({header:header!,key:key as keyof Task|'total_estimated'|'total_actual',type:type as 'text'|'number'|'date'|'calculated'}));
 
 export interface Entry {id:string;user_id:string;date:string;task_id:string;kind:string;role:string;hours:number;note:string;created_at:string;updated_at:string}
 export interface Overview {users:Engineer[];tasks:Task[];entries:Entry[];taskActuals:Record<string,{ex:number;qc:number}>;start:string;end:string;role:'admin'|'member'}
