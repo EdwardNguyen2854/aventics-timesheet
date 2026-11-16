@@ -1,13 +1,36 @@
 {
-  "schemaVersion":"1",
-  "id":"aventics.timesheet",
-  "name":"Aventics Timesheet",
-  "version":"0.1.0",
-  "type":"app",
-  "maturity":"incubating",
-  "capabilities":["timesheet.read","timesheet.write","timesheet.delete","tasks.read","tasks.write","excel.preview","excel.import","excel.export","users.manage"],
-  "interfaces":{"web":true,"http":true,"mcp":false},
-  "telemetry":{"supported":false},
-  "docs":{"path":"README.md"},
-  "host":{"type":"web"}
+  "schemaVersion": "1",
+  "id": "aventics.timesheet",
+  "name": "Aventics Timesheet",
+  "version": "0.2.0",
+  "type": "app",
+  "maturity": "incubating",
+  "capabilities": [
+    "timesheet.read",
+    "timesheet.write",
+    "timesheet.delete",
+    "tasks.read",
+    "tasks.write",
+    "excel.preview",
+    "excel.import",
+    "excel.export",
+    "users.manage",
+    "timesheet.bulk-edit",
+    "tasks.bulk-edit",
+    "branding.upload"
+  ],
+  "interfaces": {
+    "web": true,
+    "http": true,
+    "mcp": false
+  },
+  "telemetry": {
+    "supported": false
+  },
+  "docs": {
+    "path": "README.md"
+  },
+  "host": {
+    "type": "web"
+  }
 }

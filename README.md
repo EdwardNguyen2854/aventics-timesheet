@@ -1,6 +1,6 @@
 # Aventics Timesheet
 
-**Aventics Suite** · internal web application · v0.1.0 (development starter)
+**Aventics Suite** · internal web application · v0.2.0 (development starter)
 
 A browser-based engineering effort tracker that links daily time entries to a shared task register by **Task ID**. React + TypeScript frontend, Fastify + TypeScript API, SQLite file storage on a single internal server. **No Electron, no desktop client.**
 
@@ -9,12 +9,12 @@ A browser-based engineering effort tracker that links daily time entries to a sh
 ## Features
 
 - Login with individually managed engineer accounts; administrators can create engineers and reset passwords.
-- Overview: team effort, EX/QC/non-project hours, daily distribution, task status summary.
-- Timesheet: click any date and log hours per task, role, or absence category; delete and re-enter corrections.
-- Task register: serial number, IP number, task name, Task ID, status, start/completion dates, EX/QC estimates, email subject; compare against lifetime actual effort.
+- Overview: team effort, EX/QC/non-project hours, daily distribution, weekly effort mix, top projects, category composition and status charts.
+- Timesheet: Engineer / Status / Task ID / Role / dated columns; admin All engineers view; Excel-like edit mode with cell entry, Enter/Tab and TSV paste. Multi-note cells require detailed editor.
+- Task Tracking: 32 ordered columns matching the supplied register, spreadsheet-style editing and TSV paste (admin), calculated totals and historical baseline EX/QC hours.
 - Team capacity: daily 8-hour reference, weekend shading, exceptions, breakdown by engineer.
-- Excel: download workbook template; validate and preview Tasks or Effort sheet before import; export catalog (including per-engineer EX/QC breakout and totals), individual month, or all engineers' month.
-- Data separation: shared task catalog + SQLite database per engineer under a configurable internal server data root.
+- Excel: download month-specific `Timesheet` + 32-column `Task Tracking` workbook; preview imports, export wide monthly grid with an additional `Effort Details` sheet preserving notes, or full Task Tracking.
+- Data separation: shared task catalog and branding SVG + SQLite database per engineer under a configurable internal server data root; admin custom SVG upload and reset.
 
 ## Run locally (Windows PowerShell or Bash)
 
@@ -63,20 +63,20 @@ D:\AventicsData\Timesheet\
 
 The directory name is the engineer's immutable slug-style username. Personnel cannot request/write another engineer's records via the API; administrators can manage all engineers. Passwords are salted and scrypt-hashed, session tokens stored hashed in the shared DB. Cookies are HttpOnly, SameSite=Strict; enable Secure behind HTTPS. Restrict reverse-proxy and firewall access to your internal LAN/VPN; the app does not include enterprise SSO.
 
-## Excel workflow
+## Excel workflow — v0.2 layout
 
-1. From **Import / Export**, download the template or use [`docs/aventics-timesheet-template.xlsx`](docs/aventics-timesheet-template.xlsx).
-2. Fill **Tasks** first (admin), with unique stable `Task ID`, `IP No.`, `Serial No.`, status, estimates.
-3. Fill **Effort**: one row per `Date`, `Engineer`, `Task ID`, `Kind`, `Role`, `Hours`, `Note`.
-4. Preview the workbook in the corresponding import mode. Confirm only when validation is clean.
-5. Re-importing the same date / task / kind / role / note combination **updates** hours; other entries remain unchanged. Import does not automatically delete missing rows.
-6. Export task data and monthly efforts back into .xlsx.
+1. Download the **month-specific** workbook in Import / Export (or the static January 2026 example at [`docs/aventics-timesheet-template.xlsx`](docs/aventics-timesheet-template.xlsx)).
+2. **Task Tracking** sheet: all 32 columns in the order requested. Import tasks first (admin); Task ID is the stable key.
+3. **Timesheet** sheet: `Engineer | Status | Task ID | Role | 01.01.2026 | 02.01.2026 | ...` for every day of the chosen month. A task row uses EX/QC role and registered Task ID. For leave, holidays, meetings and other time, blank Task ID, Status = category, Role = NA.
+4. Preview before committing; import rejects invalid dates, hours, users, unknown tasks, duplicated cells and collisions with existing notes.
+5. Each nonempty hour cell updates one `note=''` entry; blank / zero cells **do not remove** old values on import. Use Edit mode to clear cells (or delete individual records).
+6. Export produces the same wide format, plus `Effort Details` preserving multiple entries and notes. A wide grid does not preserve per-entry notes by itself.
 
-**Example rows are illustrative, not real data**. Delete them before importing.
+**Task Tracking historical actuals:** importing `Actual effort`/`QC effort` records those numbers as baselines; live timesheet actuals are added. The importer preserves baselines when an unchanged app-generated export is reimported; edited totals that may overlap with logged work are flagged. Do not double-import historical work as both a baseline and individual day logs.
 
-Daily grid columns from an older Excel workbook must first be flattened into individual dated Effort rows. The task table from a legacy workbook is accepted if headers match, but time-grid cell coordinates cannot safely be used without their engineer/date/role context. Historical aggregate actual hours without dates cannot become daily timesheet records. Excel day/month inputs such as `05.01` without a year are intentionally rejected.
+**Older workbook compatibility:** `Tasks` and row-based `Effort` sheets remain supported. Engineers are identified by their login IDs (case-insensitive); create user accounts before importing.
 
-Categories: `Task`, `Meeting/Training`, `Public Holiday`, `Full-day Leave`, `Half-day Leave - 1st`, `Half-day Leave - 2nd`, `Other`. Task records require EX or QC and a known Task ID; non-task records must have Role=`NA` and blank Task ID. Hours are in quarter-hour increments, 0.25–24. Daily totals over 8h are flagged, not blocked.
+Categories: `Task`, `Meeting/Training`, `Public Holiday`, `Full-day Leave`, `Half-day Leave - 1st`, `Half-day Leave - 2nd`, `Other`. Valid hours: quarter-hour increments, 0.25–24, with 0 allowed for direct cell clear.
 
 ## Task-tracking mapping
 
@@ -127,17 +127,7 @@ Non-GET requests require `X-Requested-With: aventics-timesheet` and an authentic
 
 ## GitHub
 
-The intended private repo is `EdwardNguyen2854/aventics-timesheet`. To publish from this source folder after signing in with the GitHub CLI:
-
-```powershell
-git init
-git add .
-git commit -m "feat: initialize Aventics Timesheet web app"
-gh auth login
-gh repo create EdwardNguyen2854/aventics-timesheet --private --source . --remote origin --push
-```
-
-The connected GitHub API in the current environment did not support **creating** a repository. The repo and a live deployment have not been created by this delivered source package.
+Source: <https://github.com/EdwardNguyen2854/aventics-timesheet>. Update this existing repository with `git pull` / `git push`; do not rerun repository creation commands. This is source code only, not the internal database or configuration. `.env`, workbooks imported from customers, passwords, and SQLite files must never be committed.
 
 ## Planned next increments
 

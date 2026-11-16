@@ -4,9 +4,17 @@ import { randomUUID, randomBytes, scryptSync, timingSafeEqual, createHash } from
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { safeSlug } from './domain.js';
+import { EXTRA_TASK_COLUMNS, TASK_WRITABLE_COLUMNS } from './task-fields.js';
 
 export interface User { id:string; name:string; is_admin:number; active:number; created_at:string }
-export interface Task { id:string; serial_no:string; ip_no:string; name:string; status:string; estimated_ex:number; estimated_qc:number; email_subject:string; start_date:string; completion_date:string; updated_at:string }
+export interface Task {
+  id:string;serial_no:string;ip_no:string;series:string;revision:string;name:string;email_subject:string;
+  engineer:string;qc_engineer:string;estimated_ex:number;actual_ex_baseline:number;estimated_qc:number;
+  actual_qc_baseline:number;rework_effort:string;status:string;planned_start_date:string;start_date:string;
+  planned_completion_date:string;completion_date:string;activity_code:string;required_internal:string;
+  self_qc_completion_date:string;internal_errors:number;flexibility:string;customer_approval_date:string;
+  task_type:string;code_add:string;code_update:string;mu_execution:number;mu_qc:number;updated_at:string;
+}
 export interface Entry { id:string; date:string; task_id:string; kind:string; role:string; hours:number; note:string; created_at:string; updated_at:string }
 export const DATA_ROOT=resolve(process.env.DATA_ROOT || './data');
 const sharedPath=join(DATA_ROOT,'shared');
@@ -20,6 +28,11 @@ central.exec(`
  CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, serial_no TEXT NOT NULL DEFAULT '',ip_no TEXT NOT NULL DEFAULT '',name TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'Not started',estimated_ex REAL NOT NULL DEFAULT 0,estimated_qc REAL NOT NULL DEFAULT 0,email_subject TEXT NOT NULL DEFAULT '',start_date TEXT NOT NULL DEFAULT '',completion_date TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
  CREATE INDEX IF NOT EXISTS idx_task_ip ON tasks(ip_no);
 `);
+// Idempotent in-place migration: preserve old catalog and existing task effort.
+const existingTaskColumns=new Set((central.pragma('table_info(tasks)') as Array<{name:string}>).map(c=>c.name));
+for(const [name,definition] of Object.entries(EXTRA_TASK_COLUMNS)) {
+  if(!existingTaskColumns.has(name))central.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`);
+}
 const opened=new Map<string,Database.Database>();
 export function userDb(userId:string):Database.Database {
   const id=safeSlug(userId);if(id!==userId)throw new Error('Invalid user identifier');
@@ -101,10 +114,19 @@ export function addEntry(userId:string,input:Pick<Entry,'date'|'task_id'|'kind'|
   .run(id,input.date,input.task_id,input.kind,input.role,input.hours,input.note);
   return db.prepare('SELECT * FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note=?').get(input.date,input.task_id,input.kind,input.role,input.note) as Entry;
 }
-export function upsertTask(t:Omit<Task,'updated_at'>):void {
-  central.prepare(`INSERT INTO tasks(id,serial_no,ip_no,name,status,estimated_ex,estimated_qc,email_subject,start_date,completion_date)
-  VALUES(@id,@serial_no,@ip_no,@name,@status,@estimated_ex,@estimated_qc,@email_subject,@start_date,@completion_date)
-  ON CONFLICT(id) DO UPDATE SET serial_no=excluded.serial_no,ip_no=excluded.ip_no,name=excluded.name,status=excluded.status,estimated_ex=excluded.estimated_ex,estimated_qc=excluded.estimated_qc,email_subject=excluded.email_subject,start_date=excluded.start_date,completion_date=excluded.completion_date,updated_at=CURRENT_TIMESTAMP`).run(t);
+const taskFields=[...TASK_WRITABLE_COLUMNS];
+const upsertTaskStatement=central.prepare(`INSERT INTO tasks (${taskFields.join(',')})
+  VALUES (${taskFields.map(k=>'@'+k).join(',')})
+  ON CONFLICT(id) DO UPDATE SET ${taskFields.filter(k=>k!=='id').map(k=>`${k}=excluded.${k}`).join(',')},updated_at=CURRENT_TIMESTAMP`);
+export function upsertTask(task:Omit<Task,'updated_at'>):void {upsertTaskStatement.run(task);}
+/** Atomic single-cell mutation. Refuse aggregated cells with multiple distinct notes. */
+export function replaceEffortCell(userId:string,cell:{date:string;task_id:string;kind:string;role:string;hours:number}):void {
+  const db=userDb(userId);
+  const matches=db.prepare('SELECT id,note FROM entries WHERE date=? AND task_id=? AND kind=? AND role=?').all(cell.date,cell.task_id,cell.kind,cell.role) as Array<{id:string;note:string}>;
+  if(matches.length>1)throw Object.assign(new Error('Multiple notes exist in this cell. Edit the entries individually.'),{statusCode:409});
+  if(cell.hours===0){if(matches[0])db.prepare('DELETE FROM entries WHERE id=?').run(matches[0].id);return;}
+  if(matches[0])db.prepare('UPDATE entries SET hours=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(cell.hours,matches[0].id);
+  else addEntry(userId,{...cell,note:''});
 }
 export function removeEntry(userId:string,id:string):boolean {return userDb(userId).prepare('DELETE FROM entries WHERE id=?').run(id).changes>0;}
 export function closeDbs(){for(const db of opened.values())db.close();central.close();}

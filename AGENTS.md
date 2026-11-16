@@ -17,12 +17,12 @@ Suite agent baseline: 2 (2026-11)
 - **Web only**: React frontend served by Node API; never Electron.
 - Store all data on one configured internal server `DATA_ROOT`. The central catalog lives in `shared/`; engineer logs live in `users/{engineerId}/effort.sqlite`.
 - Never open SQLite DBs over SMB from multiple host machines. Only one API process writes databases.
-- Use stable `Task ID` as reference key. Distinguish EX vs QC actual hours; never treat estimate as actual.
+- Use stable `Task ID` as reference key; Task Tracking has 32 visible columns, with additive migrations for existing catalogs. Distinguish EX vs QC actual hours; never treat estimate as actual.
 - No undated legacy totals may be fabricated into daily records.
 - Import is preview-first; do not write until explicit confirm.
-- Non-admin users can change only their own daily entries.
+- Non-admin users can read/change only their own daily entries; admin All engineers view and grid changes must enforce ownership on server.
 - Keep data, secrets, .env, logs, and workbook archives outside source control.
-- Preserve Aventics UI Skill: light, square, compact, Bosch logo section and supergraphic, one Bosch blue accent.
+- Preserve Aventics UI Skill: light, square, compact, Bosch logo section and supergraphic, one Bosch blue accent. Admin SVG supergraphic overrides are stored under DATA_ROOT/shared/branding and must reject active content.
 
 ## Suite alignment
 

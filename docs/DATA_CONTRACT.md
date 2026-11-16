@@ -1,29 +1,56 @@
-# Data contract v1
+# Data contract v2 — Aventics Timesheet
 
-## Keys
+## Stable identity
 
-`users.id`: immutable slug identifier, also the per-engineer folder name. `tasks.id`: full external Task ID string such as `4032-ip1767_tm5_r12` (not Serial No). `entries.id`: generated UUID. Entry references `task_id` by stable external key; the link is validated in the API against the shared catalog.
+- `users.id`: immutable engineer slug and folder key. `tasks.id`: full Task ID; unique across projects.
+- `entries.id`: UUID; uniqueness `(date, task_id, kind, role, note)` within each engineer SQLite database.
+- `shared/catalog.sqlite` stores Task Tracking; `users/<id>/effort.sqlite` stores daily logs.
+- Catalog migration is additive and idempotent; schema upgrades via `PRAGMA table_info` and `ALTER TABLE`.
 
-## Task columns
+## Task Tracking — 32 columns
 
-`id`, `serial_no`, `ip_no`, `name`, `status`, `estimated_ex`, `estimated_qc`, `email_subject`, `start_date`, `completion_date`, `updated_at`. Status: `Not started`, `In progress`, `Sent to QC`, `Completed`, `On hold`, `Cancelled`.
+The exact ordered headers are defined in `apps/server/src/excel.ts` (`TRACKING_COLUMNS`), and the client mirrors them in `apps/web/src/api.ts`.
 
-## Daily effort columns
+| Spreadsheet | Database / calculation |
+|---|---|
+| Serial no., Project ID, Series, Revision, Task ID, Task Name, Mail Subject | `serial_no`, `ip_no`, `series`, `revision`, `id`, `name`, `email_subject` |
+| Engineer, QC Engineer | `engineer`, `qc_engineer` (text, not logins for access control) |
+| Estimation Effort, Estimation time for QC | `estimated_ex`, `estimated_qc` |
+| Actual effort, QC effort | `actual_ex_baseline + recorded EX`, `actual_qc_baseline + recorded QC` |
+| Rework effort, Status | `rework_effort` (text), `status` |
+| Planned Start Date, Actual Start Date, Planned completion Date, Actual completion Date | `planned_start_date`, `start_date`, `planned_completion_date`, `completion_date` |
+| Activity code, Required Internal (Sent for Peer QC), Task Completion date with Self QC | `activity_code`, `required_internal`, `self_qc_completion_date` |
+| No of Internal Error, Flexibility, Customer Approval date | `internal_errors`, `flexibility`, `customer_approval_date` |
+| Type of task, Code no. ADD, Code no. UPDATE | `task_type`, `code_add`, `code_update` |
+| Total Estimation Effort, Total Actual effort | Calculated EX + QC (not persisted) |
+| MU-Execution, MU-QC | `mu_execution`, `mu_qc` |
 
-`id`, `date` (ISO), `task_id` (blank for non-task), `kind`, `role`, `hours`, `note`, `created_at`, `updated_at`.
+All task dates use ISO `YYYY-MM-DD` internally. Excel date serials and `DD.MM.YYYY` are recognized on import.
 
-Uniqueness: `(date, task_id, kind, role, note)` **within each engineer database**. Reimport/upsert uses the same compound key; change the note intentionally to represent a distinct entry. Hours are multiples of 0.25 and 0.25–24. A person may have 8+ hours in a day; the UI displays a warning, not a blocker.
+### Actual effort reconciliation
 
-## Derived values
+Historical totals loaded via Task Tracking are **baselines**. Timesheet EX/QC entries are added to them. Reimporting an unchanged app-generated Task Tracking export preserves the previous baseline when exported totals match the current baseline + logged time; changed imported totals produce a warning if entries are already logged. Avoid importing the same historical work as daily logs and baseline hours.
 
-Actual EX effort per task = sum(hours) over all users and all dates where `kind='Task'` and `role='EX'`. QC analogous. Variance = lifetime EX+QC actual − (estimated EX+QC). The Task Register displays the actuals only across the **visible engineers** (all for admin, self for member) and labels this explicitly. Monthly dashboard uses only entries within the chosen month. Non-project categories never add to EX/QC actual.
+## Timesheet grid — month-dependent
 
-## XLSX schema
+Header: `Engineer | Status | Task ID | Role | 01.01.2026 | ...` (all days of selected month).
 
-- Tasks header: `Status`, `Serial No.`, `IP No.`, `Task Name`, `Task ID`, `Start Date`, `Completion Date`, `Estimated EX Effort`, `Estimated QC Effort`, `Email Subject`.
-- Effort header: `Date`, `Engineer`, `Task ID`, `Kind`, `Role`, `Hours`, `Note`.
-- Notes: `YYYY-MM-DD` dates, engineer login ID, exact Task ID, quarter-hour hours, statuses and categories per template.
+- Task: `Task ID` nonblank, role `EX` or `QC`, Status informational (taken from task catalog on export).
+- Non-task: blank Task ID, Status equal to entry category, Role `NA`.
+- Each nonempty day cell creates/updates an effort entry with `note=''`. Zero / blank on import does not delete existing entries.
+- Existing entries with notes in the target cell are **protected**: a wide-grid import with colliding cells is rejected; edit them in the detail editor.
+- Older `Tasks` and row-based `Effort` sheets remain importable.
+- Exported `Effort Details` sheet preserves notes and individual records. A wide grid has aggregated cells, not all note metadata.
 
-## Cross-database guarantees
+## Authorization and transactions
 
-The `Tasks` sheet import has a single SQLite transaction. `Effort` imports are one transaction per engineer; mixed-user imports can partially commit if a later user's database operation fails. Input files are archived after successful commit. Import preview validates row schemas, memberships, existing task references and basic integrity; it does not perform a complex all-user transaction dry run. Production migration should add audit and recovery checkpoints.
+- Engineers can read/update only their own daily entries. Admins can view/edit all engineers using the Timesheet `All engineers` selector.
+- Task editing, bulk task paste, branding and shared catalog imports are admin-only.
+- Bulk changes are validated before writes; one transaction per engineer DB. Cross-engineer batches are not atomic across files.
+- Imports are preview-first. Excel exported task totals are derived, never directly stored.
+
+## Custom SVG supergraphic
+
+- Admin `POST /api/branding/supergraphic` replaces `shared/branding/supergraphic.svg`, and `DELETE` restores the fallback.
+- Served via read-only SVG image endpoint with a sandboxed CSP. The upload validator blocks active/external references and limits size to 256 KB.
+- SVG data is outside the app/repo and survives code upgrades; do not commit custom internal brand assets to the public repo.

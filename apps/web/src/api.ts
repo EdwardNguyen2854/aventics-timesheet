@@ -1,5 +1,29 @@
 export interface Engineer {id:string;name:string;is_admin:number;active:number;created_at:string}
-export interface Task {id:string;serial_no:string;ip_no:string;name:string;status:string;estimated_ex:number;estimated_qc:number;email_subject:string;start_date:string;completion_date:string;updated_at:string}
+export interface Task {
+ id:string;serial_no:string;ip_no:string;series:string;revision:string;name:string;email_subject:string;
+ engineer:string;qc_engineer:string;estimated_ex:number;actual_ex_baseline:number;estimated_qc:number;
+ actual_qc_baseline:number;rework_effort:string;status:string;planned_start_date:string;start_date:string;
+ planned_completion_date:string;completion_date:string;activity_code:string;required_internal:string;
+ self_qc_completion_date:string;internal_errors:number;flexibility:string;customer_approval_date:string;
+ task_type:string;code_add:string;code_update:string;mu_execution:number;mu_qc:number;updated_at:string;
+}
+export const TRACKING_COLUMNS:{header:string;key:keyof Task|'total_estimated'|'total_actual';type:'text'|'number'|'date'|'calculated'}[]=[
+ ['Serial no.','serial_no','text'],['Project ID','ip_no','text'],['Series','series','text'],['Revision','revision','text'],
+ ['Task ID','id','text'],['Task Name','name','text'],['Mail Subject','email_subject','text'],
+ ['Engineer','engineer','text'],['QC Engineer','qc_engineer','text'],
+ ['Estimation Effort','estimated_ex','number'],['Actual effort','actual_ex_baseline','number'],
+ ['Estimation time for QC','estimated_qc','number'],['QC effort','actual_qc_baseline','number'],
+ ['Rework effort','rework_effort','text'],['Status','status','text'],
+ ['Planned Start Date','planned_start_date','date'],['Actual Start Date','start_date','date'],
+ ['Planned completion Date','planned_completion_date','date'],['Actual completion Date','completion_date','date'],
+ ['Activity code','activity_code','text'],['Required Internal (Sent for Peer QC)','required_internal','text'],
+ ['Task Completion date with Self QC','self_qc_completion_date','date'],['No of Internal Error','internal_errors','number'],
+ ['Flexibility','flexibility','text'],['Customer Approval date','customer_approval_date','date'],
+ ['Type of task','task_type','text'],['Code no. ADD','code_add','text'],['Code no. UPDATE','code_update','text'],
+ ['Total Estimation Effort','total_estimated','calculated'],['Total Actual effort','total_actual','calculated'],
+ ['MU-Execution','mu_execution','number'],['MU-QC','mu_qc','number']
+].map(([header,key,type])=>({header,key:key as keyof Task|'total_estimated'|'total_actual',type:type as 'text'|'number'|'date'|'calculated'}));
+
 export interface Entry {id:string;user_id:string;date:string;task_id:string;kind:string;role:string;hours:number;note:string;created_at:string;updated_at:string}
 export interface Overview {users:Engineer[];tasks:Task[];entries:Entry[];taskActuals:Record<string,{ex:number;qc:number}>;start:string;end:string;role:'admin'|'member'}
 export interface ImportPreview {mode:'tasks'|'effort';rows:number;tasks:Task[];entries:Entry[];errors:string[];warnings:string[]}

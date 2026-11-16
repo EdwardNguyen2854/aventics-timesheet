@@ -1,10 +1,16 @@
-import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent,type ClipboardEvent,type KeyboardEvent} from 'react';
 import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,Plus,Download,Upload,ChevronLeft,ChevronRight,Search,RefreshCw,X,Trash2,Check,AlertTriangle,LogOut,Database,LockKeyhole} from 'lucide-react';
-import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview} from './api';
+import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview,TRACKING_COLUMNS} from './api';
 
 type Page='overview'|'timesheet'|'tasks'|'team'|'exchange'|'admin';
-const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task register',ListChecks],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
-const emptyTask:Omit<Task,'updated_at'>={id:'',serial_no:'',ip_no:'',name:'',status:'Not started',estimated_ex:0,estimated_qc:0,email_subject:'',start_date:'',completion_date:''};
+const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
+const emptyTask:Omit<Task,'updated_at'>={
+ id:'',serial_no:'',ip_no:'',series:'',revision:'',name:'',email_subject:'',engineer:'',qc_engineer:'',
+ estimated_ex:0,actual_ex_baseline:0,estimated_qc:0,actual_qc_baseline:0,rework_effort:'',status:'Not started',
+ planned_start_date:'',start_date:'',planned_completion_date:'',completion_date:'',activity_code:'',required_internal:'',
+ self_qc_completion_date:'',internal_errors:0,flexibility:'',customer_approval_date:'',task_type:'',code_add:'',code_update:'',
+ mu_execution:0,mu_qc:0
+};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const labelDate=(date:string)=>new Date(`${date}T00:00:00`).toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short'});
 const isWeekend=(date:string)=>[0,6].includes(new Date(`${date}T00:00:00`).getDay());
@@ -13,13 +19,57 @@ function Notice({message,onClose}:{message:string;onClose:()=>void}){return <div
 function Login({onDone}:{onDone:(u:Engineer)=>void}){
  const [username,setUsername]=useState('admin'),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  async function submit(ev:FormEvent){ev.preventDefault();setBusy(true);setError('');try{const data=await api<{user:Engineer}>('/auth/login',{method:'POST',body:JSON.stringify({username,password})});onDone(data.user);}catch(e){setError(String((e as Error).message));}finally{setBusy(false);}}
- return <div className="login-shell"><div className="accent-strip"/><form className="login-card" onSubmit={submit}>
+ return <div className="login-shell"><Supergraphic/><form className="login-card" onSubmit={submit}>
  <div className="brand login-brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Timesheet</strong></div></div>
  <h1>Sign in</h1><p className="muted">Team effort tracking · Internal network</p>
  <label>Username<input className="input" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} required/></label>
  <label>Password<input className="input" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>
  {error&&<div className="error-msg">{error}</div>}<button className="btn primary" disabled={busy}>{busy?'Signing in…':'Sign in'}</button><small>Access is limited to authorized engineers.</small>
  </form></div>;
+}
+function Supergraphic({revision=0}:{revision?:number}){
+ const [custom,setCustom]=useState(false);
+ useEffect(()=>{let live=true;api<{custom:boolean}>('/branding/status').then(s=>{if(live)setCustom(s.custom);}).catch(()=>{if(live)setCustom(false);});return()=>{live=false;};},[revision]);
+ return <div className="accent-strip" aria-hidden="true">{custom&&<img src={`/api/branding/supergraphic.svg?v=${revision}`} alt=""/>}</div>;
+}
+function OverviewInsights({overview}:{overview:Overview}){
+ const entries=overview.entries,tasks=overview.tasks;
+ const ex=sum(entries,e=>e.kind==='Task'&&e.role==='EX'),qc=sum(entries,e=>e.kind==='Task'&&e.role==='QC');
+ const support=sum(entries,e=>['Meeting/Training','Other'].includes(e.kind)),leave=sum(entries,e=>e.kind.includes('Leave')||e.kind==='Public Holiday');
+ const mix=[{name:'Execution',value:ex,cls:'blue'},{name:'QC',value:qc,cls:'teal'},{name:'Meetings / other',value:support,cls:'gray'},{name:'Leave / holiday',value:leave,cls:'amber'}];
+ const total=ex+qc+support+leave;
+ const weekly=new Map<string,{name:string;ex:number;qc:number;other:number}>();
+ for(const entry of entries){
+   const d=new Date(`${entry.date}T00:00:00Z`),day=d.getUTCDay();d.setUTCDate(d.getUTCDate()-(day===0?6:day-1));
+   const name=`${String(d.getUTCDate()).padStart(2,'0')} ${d.toLocaleString('en',{month:'short',timeZone:'UTC'})}`;
+   const group=weekly.get(name)||{name,ex:0,qc:0,other:0};
+   if(entry.role==='EX'&&entry.kind==='Task')group.ex+=entry.hours;
+   else if(entry.role==='QC'&&entry.kind==='Task')group.qc+=entry.hours;else group.other+=entry.hours;
+   weekly.set(name,group);
+ }
+ const weeks=[...weekly.values()],maximum=Math.max(1,...weeks.map(w=>w.ex+w.qc+w.other));
+ const projects=new Map<string,number>();
+ for(const entry of entries){if(entry.kind!=='Task')continue;const id=tasks.find(t=>t.id===entry.task_id)?.ip_no||'Unassigned';projects.set(id,(projects.get(id)||0)+entry.hours);}
+ const top=[...projects.entries()].sort((a,b)=>b[1]-a[1]).slice(0,7),maxProject=Math.max(1,...top.map(p=>p[1]));
+ const byStatus=STATUSES.map(status=>({status,n:tasks.filter(t=>t.status===status).length})).filter(x=>x.n),maxStatus=Math.max(1,...byStatus.map(s=>s.n));
+ return <div className="insights-grid">
+   <section className="panel"><div className="panel-header"><h2>Effort composition</h2><span className="subtle">By category · hours</span></div><div className="panel-body insight-layout">
+     <div className="donut" style={{background:total?`conic-gradient(var(--av-blue) 0 ${ex/total*100}%, var(--av-green) ${ex/total*100}% ${(ex+qc)/total*100}%, #bfc3c7 ${(ex+qc)/total*100}% ${(ex+qc+support)/total*100}%, var(--av-amber) ${(ex+qc+support)/total*100}% 100%)`:undefined}}>
+       <div><strong>{fmtHours(total)}</strong><span>hours</span></div></div>
+     <div className="insight-legend">{mix.map(x=><div key={x.name}><i className={`swatch ${x.cls}`}/><span>{x.name}</span><strong>{fmtHours(x.value)}h</strong></div>)}</div>
+   </div></section>
+   <section className="panel"><div className="panel-header"><h2>Weekly effort mix</h2><span className="subtle">EX / QC / support + leave</span></div><div className="panel-body compact-chart">
+     {weeks.length?weeks.map(w=><div className="metric-row" key={w.name}><span>{w.name}</span><div className="metric-track stacked">
+       <i className="metric-blue" style={{width:`${100*w.ex/maximum}%`}}/><i className="metric-green" style={{width:`${100*w.qc/maximum}%`}}/><i className="metric-gray" style={{width:`${100*w.other/maximum}%`}}/>
+       </div><strong>{fmtHours(w.ex+w.qc+w.other)}h</strong></div>):<div className="empty">No effort logged this month.</div>}
+   </div></section>
+   <section className="panel"><div className="panel-header"><h2>Top projects by effort</h2><span className="subtle">This month · project ID</span></div><div className="panel-body compact-chart">
+     {top.length?top.map(([project,h])=><div className="metric-row" key={project}><span title={project}>{project}</span><div className="metric-track"><i className="metric-blue" style={{width:`${100*h/maxProject}%`}}/></div><strong>{fmtHours(h)}h</strong></div>):<div className="empty">No task effort to compare.</div>}
+   </div></section>
+   <section className="panel"><div className="panel-header"><h2>Task status distribution</h2><span className="subtle">All registered tasks</span></div><div className="panel-body compact-chart">
+     {byStatus.length?byStatus.map(x=><div className="metric-row" key={x.status}><span title={x.status}>{x.status}</span><div className="metric-track"><i className="metric-blue" style={{width:`${100*x.n/maxStatus}%`}}/></div><strong>{x.n}</strong></div>):<div className="empty">Import a Task Tracking workbook first.</div>}
+   </div></section>
+ </div>;
 }
 function KPIs({overview}:{overview:Overview}){
  const entries=overview.entries,tasks=overview.tasks;
@@ -40,8 +90,8 @@ function OverviewPage({overview,month,onGo}:{overview:Overview;month:string;onGo
  <div className="bar-chart">{days.map((day,i)=><div className="bar-col" key={day} title={`${day}: ${fmtHours(totals[i]||0)} h`}><div className="bar-track"><div className={`bar ${isWeekend(day)?'weekend-bar':''}`} style={{height:`${((totals[i]||0)/peak)*100}%`}}/></div><span>{i%5===0||i===days.length-1?String(i+1).padStart(2,'0'):''}</span></div>)}</div>
  <div className="chart-foot"><span>01 {month}</span><span>{fmtHours(sum(entries))} hours recorded</span><span>{days.length} days</span></div></div></section>
  <section className="panel"><div className="panel-header"><h2>Workload snapshot</h2><span className="subtle">Active task register</span></div>
- <div className="snapshot"><div className="snapshot-row"><span>Tasks with effort this month</span><strong>{assigned.size}</strong></div><div className="snapshot-row"><span>Completed tasks</span><strong>{overview.tasks.filter(t=>t.status==='Completed').length}</strong></div><div className="snapshot-row"><span>Pending QC</span><strong>{overview.tasks.filter(t=>t.status==='Sent to QC').length}</strong></div><div className="snapshot-row"><span>Team members</span><strong>{users.length}</strong></div><button className="btn small" onClick={()=>onGo('tasks')}>Open task register <ChevronRight size={13}/></button></div></section>
- </div><section className="panel"><div className="panel-header"><h2>Team summary</h2><button className="btn small" onClick={()=>onGo('team')}>View capacity <ChevronRight size={14}/></button></div><div className="table-scroll"><table><thead><tr><th>Engineer</th><th>EX effort</th><th>QC effort</th><th>Other / leave</th><th>Total logged</th><th>Distribution</th></tr></thead><tbody>{summary.map(x=><tr key={x.u.id}><td><strong>{x.u.name}</strong><div className="mono subtle">{x.u.id}</div></td><td className="num">{fmtHours(x.ex)}</td><td className="num">{fmtHours(x.qc)}</td><td className="num">{fmtHours(x.other)}</td><td className="num strong">{fmtHours(x.total)}</td><td style={{minWidth:160}}><div className="stacked-bar"><span style={{width:`${x.total?100*x.ex/x.total:0}%`}}/><span style={{width:`${x.total?100*x.qc/x.total:0}%`,opacity:.6}}/><span style={{width:`${x.total?100*x.other/x.total:0}%`,background:'#bfc3c7'}}/></div></td></tr>)}{!summary.length&&<tr><td colSpan={6} className="empty">Add engineers in Administration to get started.</td></tr>}</tbody></table></div></section></>;
+ <div className="snapshot"><div className="snapshot-row"><span>Tasks with effort this month</span><strong>{assigned.size}</strong></div><div className="snapshot-row"><span>Completed tasks</span><strong>{overview.tasks.filter(t=>t.status==='Completed').length}</strong></div><div className="snapshot-row"><span>Pending QC</span><strong>{overview.tasks.filter(t=>t.status==='Sent to QC').length}</strong></div><div className="snapshot-row"><span>Team members</span><strong>{users.length}</strong></div><button className="btn small" onClick={()=>onGo('tasks')}>Open Task Tracking <ChevronRight size={13}/></button></div></section>
+ </div><OverviewInsights overview={overview}/><section className="panel"><div className="panel-header"><h2>Team summary</h2><button className="btn small" onClick={()=>onGo('team')}>View capacity <ChevronRight size={14}/></button></div><div className="table-scroll"><table><thead><tr><th>Engineer</th><th>EX effort</th><th>QC effort</th><th>Other / leave</th><th>Total logged</th><th>Distribution</th></tr></thead><tbody>{summary.map(x=><tr key={x.u.id}><td><strong>{x.u.name}</strong><div className="mono subtle">{x.u.id}</div></td><td className="num">{fmtHours(x.ex)}</td><td className="num">{fmtHours(x.qc)}</td><td className="num">{fmtHours(x.other)}</td><td className="num strong">{fmtHours(x.total)}</td><td style={{minWidth:160}}><div className="stacked-bar"><span style={{width:`${x.total?100*x.ex/x.total:0}%`}}/><span style={{width:`${x.total?100*x.qc/x.total:0}%`,opacity:.6}}/><span style={{width:`${x.total?100*x.other/x.total:0}%`,background:'#bfc3c7'}}/></div></td></tr>)}{!summary.length&&<tr><td colSpan={6} className="empty">Add engineers in Administration to get started.</td></tr>}</tbody></table></div></section></>;
 }
 function EntryEditor({overview,selectedUser,initialDate,onSaved,onClose}:{overview:Overview;selectedUser:string;initialDate:string;onSaved:()=>void;onClose:()=>void}){
  const [date,setDate]=useState(initialDate),[kind,setKind]=useState<string>('Task'),[role,setRole]=useState('EX'),[hours,setHours]=useState('8'),[taskId,setTaskId]=useState(''),[filter,setFilter]=useState(''),[note,setNote]=useState(''),[busy,setBusy]=useState(false),[err,setErr]=useState('');
@@ -54,42 +104,257 @@ function EntryEditor({overview,selectedUser,initialDate,onSaved,onClose}:{overvi
  {err&&<div className="error-msg">{err}</div>}
  <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy?'Saving…':'Save effort'}</button></div></form></section></div>;
 }
+interface GridRow {key:string;userId:string;status:string;taskId:string;kind:string;role:string;entries:Entry[]}
 function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overview:Overview;selectedUser:string;onUser:(id:string)=>void;month:string;refresh:()=>void;flash:(s:string)=>void}){
- const days=daysOfMonth(month),users=overview.users,entries=overview.entries.filter(e=>e.user_id===selectedUser);
- const [editingDate,setEditingDate]=useState<string|null>(null),[cellDetails,setCellDetails]=useState<Entry[]|null>(null),[search,setSearch]=useState('');
- const tasksById=new Map(overview.tasks.map(t=>[t.id,t]));
- const grouped=useMemo(()=>{const map=new Map<string,Entry[]>();for(const e of entries){const key=e.kind==='Task'?`${e.task_id} / ${e.role}`:e.kind;const all=map.get(key)||[];all.push(e);map.set(key,all);}return [...map.entries()].filter(([key])=>key.toLowerCase().includes(search.toLowerCase())).sort(([a],[b])=>a.localeCompare(b));},[entries,search]);
- const dayTotals=new Map(days.map(d=>[d,sum(entries,e=>e.date===d)]));
- async function del(e:Entry){if(!window.confirm(`Remove ${e.hours} h on ${e.date} (${e.kind})?`))return;try{await api(`/entries/${encodeURIComponent(e.id)}?userId=${encodeURIComponent(selectedUser)}`,{method:'DELETE'});flash('Entry deleted');refresh();}catch(err){flash((err as Error).message);}}
- return <><div className="toolbar panel-toolbar"><div className="toolbar-left"><select className="input short" value={selectedUser} onChange={e=>onUser(e.target.value)}>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select><div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter task rows"/></div></div><div className="toolbar-right"><span className="subtle">Click a date or Add effort to log time</span><button className="btn primary" onClick={()=>setEditingDate(today().startsWith(month)?today():`${month}-01`)}><Plus size={15}/>Add effort</button></div></div>
- <section className="panel"><div className="panel-header"><h2>Monthly effort grid</h2><span className="subtle">Workload totals · quarter-hour precision</span></div>
- <div className="timesheet-scroll"><table className="timegrid"><thead><tr><th className="sticky-task" rowSpan={2}>TASK / CATEGORY</th><th className="sticky-total" rowSpan={2}>TOTAL</th>{days.map(d=><th key={d} className={`day-head ${isWeekend(d)?'weekend':''}`}><button title={`Log time on ${d}`} onClick={()=>setEditingDate(d)}>{new Date(`${d}T00:00:00`).toLocaleDateString('en',{weekday:'short'})}</button></th>)}</tr><tr>{days.map(d=><th key={d} className={`date-head ${isWeekend(d)?'weekend':''}`}><button title={`Log time on ${d}`} onClick={()=>setEditingDate(d)}>{d.slice(-2)}</button></th>)}</tr></thead>
- <tbody><tr className="day-total-row"><td className="sticky-task"><strong>TOTAL / DAY</strong></td><td className="sticky-total">{fmtHours(sum(entries))}</td>{days.map(d=><td key={d} className={`day-cell ${isWeekend(d)?'weekend':''}`}><span className={(dayTotals.get(d)||0)>8?'over':'day-total'}>{dayTotals.get(d)?fmtHours(dayTotals.get(d)!):'·'}</span></td>)}</tr>
- {grouped.map(([key,rows])=>{const total=sum(rows),taskId=rows[0]?.task_id,task=taskId?tasksById.get(taskId):undefined;return <tr key={key}><td className="sticky-task task-name"><div className="task-key" title={key}>{key}</div>{task&&<small>{task.name||task.ip_no}</small>}</td><td className="sticky-total num strong">{fmtHours(total)}</td>{days.map(d=>{const cell=rows.filter(e=>e.date===d),h=sum(cell);return <td key={d} className={`day-cell ${isWeekend(d)?'weekend':''}`}>{cell.length?<button className={`effort-cell ${rows[0]?.role==='QC'?'qc':rows[0]?.kind==='Task'?'ex':'absence'}`} title={`${labelDate(d)} · ${fmtHours(h)} h. Click to inspect entries.`} onClick={()=>setCellDetails(cell)}>{fmtHours(h)}</button>:<button className="blank-day" title={`Add effort on ${d}`} onClick={()=>setEditingDate(d)}>·</button>}</td>;})}</tr>;})}
- {!grouped.length&&<tr><td colSpan={days.length+2} className="empty">No effort records. Choose Add effort to enter the first record.</td></tr>}</tbody></table></div>
- <div className="table-footer"><span><i className="swatch blue"/>EX task effort</span><span><i className="swatch teal"/>QC task effort</span><span><i className="swatch gray"/>Non-project</span><span>Red totals indicate more than 8 hours logged on a day.</span></div>
- </section>{cellDetails&&<div className="modal-backdrop" onClick={()=>setCellDetails(null)}><section className="modal" role="dialog" aria-modal="true" aria-label="Logged entries" onClick={e=>e.stopPropagation()}><div className="panel-header"><h2>Entries · {cellDetails[0]?.date}</h2><button className="icon-btn" aria-label="Close" onClick={()=>setCellDetails(null)}><X size={16}/></button></div><div className="panel-body">{cellDetails.map(e=><div className="entry-detail" key={e.id}><div><strong>{fmtHours(e.hours)} h · {e.role==='NA'?e.kind:e.role}</strong><small>{e.note||e.task_id||'No note'}</small></div><button className="btn small" onClick={async()=>{await del(e);setCellDetails(null);}}><Trash2 size={13}/>Remove</button></div>)}<div className="modal-actions"><button className="btn" onClick={()=>setCellDetails(null)}>Close</button><button className="btn primary" onClick={()=>{setEditingDate(cellDetails[0]?.date||today());setCellDetails(null);}}><Plus size={14}/>Add entry</button></div></div></section></div>}{editingDate&&<EntryEditor overview={overview} selectedUser={selectedUser} initialDate={editingDate} onClose={()=>setEditingDate(null)} onSaved={()=>{setEditingDate(null);refresh();flash('Effort saved');}}/>}</>;
+ const days=useMemo(()=>daysOfMonth(month),[month]);
+ const users=overview.users,allView=selectedUser==='all',isAdmin=overview.role==='admin';
+ const entries=useMemo(()=>overview.entries.filter(e=>allView||e.user_id===selectedUser),[overview.entries,allView,selectedUser]);
+ const [editMode,setEditMode]=useState(false),[active,setActive]=useState<{key:string;date:string;draft:string}|null>(null);
+ const [entryModal,setEntryModal]=useState<{userId:string;date:string}|null>(null),[details,setDetails]=useState<{entries:Entry[];userId:string}|null>(null);
+ const [search,setSearch]=useState(''),[err,setErr]=useState('');
+ const [extraRows,setExtraRows]=useState<GridRow[]>([]),[newTask,setNewTask]=useState(''),[newKind,setNewKind]=useState('Task'),[newRole,setNewRole]=useState('EX'),[newPerson,setNewPerson]=useState('');
+ const saving=useRef(new Set<string>());
+ useEffect(()=>{setActive(null);setExtraRows([]);},[month,selectedUser]);
+ const taskMap=useMemo(()=>new Map(overview.tasks.map(t=>[t.id,t])),[overview.tasks]);
+ const userMap=useMemo(()=>new Map(users.map(u=>[u.id,u])),[users]);
+ const makeKey=(userId:string,kind:string,taskId:string,role:string)=>JSON.stringify([userId,kind,taskId,role]);
+ const rows=useMemo(()=>{
+   const map=new Map<string,GridRow>();
+   for(const e of entries){const key=makeKey(e.user_id,e.kind,e.task_id,e.role);
+     const row=map.get(key)||{key,userId:e.user_id,status:e.kind,taskId:e.task_id,kind:e.kind,role:e.role,entries:[]};
+     row.entries.push(e);map.set(key,row);
+   }
+   for(const row of extraRows)if((allView||row.userId===selectedUser)&&!map.has(row.key))map.set(row.key,row);
+   return [...map.values()].map(row=>({...row,status:row.kind==='Task'?taskMap.get(row.taskId)?.status||'Unknown task':row.kind}))
+     .filter(row=>`${row.userId} ${row.status} ${row.taskId} ${row.kind} ${row.role}`.toLowerCase().includes(search.toLowerCase()))
+     .sort((a,b)=>a.userId.localeCompare(b.userId)||a.taskId.localeCompare(b.taskId)||a.kind.localeCompare(b.kind)||a.role.localeCompare(b.role));
+ },[entries,extraRows,allView,selectedUser,taskMap,search]);
+ const rowIndex=new Map(rows.map((row,i)=>[row.key,i]));
+ const entriesFor=(row:GridRow,date:string)=>row.entries.filter(e=>e.date===date);
+ const valueFor=(row:GridRow,date:string)=>sum(entriesFor(row,date));
+ const dayTotal=(date:string)=>sum(entries,e=>e.date===date);
+ function addRow(){const userId=allView?(newPerson||users[0]?.id||''):selectedUser;
+   if(!userId){setErr('Select an engineer first.');return;}
+   if(newKind==='Task'&&!newTask){setErr('Choose a task before adding the row.');return;}
+   const taskId=newKind==='Task'?newTask:'',role=newKind==='Task'?newRole:'NA';
+   const row:GridRow={key:makeKey(userId,newKind,taskId,role),userId,status:newKind,taskId,kind:newKind,role,entries:[]};
+   if(!rows.some(r=>r.key===row.key))setExtraRows(old=>[...old,row]);
+   setSearch('');setErr('');
+   setActive({key:row.key,date:days[0]||`${month}-01`,draft:''});
+ }
+ async function commitCell(cell:{key:string;date:string;draft:string},next?:{key:string;date:string}){
+   const id=cell.key+'@'+cell.date;if(saving.current.has(id))return;
+   const row=rows.find(r=>r.key===cell.key);
+   if(!row){setActive(null);return;}
+   const text=cell.draft.trim().replace(',','.');const hours=text===''?0:Number(text);
+   if(!Number.isFinite(hours)||hours<0||hours>24||Math.round(hours*4)!==hours*4){setErr('Enter hours in 0.25 increments from 0 to 24. Empty clears the cell.');return;}
+   if(entriesFor(row,cell.date).length>1){setErr('This cell contains multiple entries with notes. Use View mode to manage them individually.');return;}
+   if(hours===valueFor(row,cell.date)){setActive(next?{...next,draft:String(valueFor(rows.find(r=>r.key===next.key)||row,next.date)||'')}:null);return;}
+   saving.current.add(id);setActive(next?{...next,draft:String(valueFor(rows.find(r=>r.key===next.key)||row,next.date)||'')}:null);setErr('');
+   try{await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:[{user_id:row.userId,date:cell.date,task_id:row.taskId,kind:row.kind,role:row.role,hours}]})});
+     flash('Cell saved');refresh();
+   }catch(error){setErr((error as Error).message);}finally{saving.current.delete(id);}
+ }
+ async function pasteCells(event:ClipboardEvent<HTMLInputElement>,cell:{key:string;date:string;draft:string}){
+   const text=event.clipboardData.getData('text/plain');if(!text.includes('\t')&&!text.includes('\n'))return;
+   event.preventDefault();
+   const startRow=rowIndex.get(cell.key),startDay=days.indexOf(cell.date);
+   if(startRow===undefined||startDay<0)return;
+   const lines=text.replace(/\r/g,'').trimEnd().split('\n').map(line=>line.split('\t'));
+   const cells:Array<{user_id:string;date:string;task_id:string;kind:string;role:string;hours:number}>=[];
+   for(let r=0;r<lines.length;r++)for(let c=0;c<(lines[r]?.length||0);c++){
+     const row=rows[startRow+r],date=days[startDay+c];if(!row||!date){setErr('Paste exceeds the visible grid; no changes made.');return;}
+     const raw=(lines[r]?.[c]||'').trim().replace(',','.');const hours=raw?Number(raw):0;
+     if(!Number.isFinite(hours)||hours<0||hours>24||Math.round(hours*4)!==hours*4){setErr(`Invalid pasted hours at row ${r+1}, column ${c+1}`);return;}
+     cells.push({user_id:row.userId,date,task_id:row.taskId,kind:row.kind,role:row.role,hours});
+   }
+   if(!cells.length)return;const pasteKey=cell.key+'@'+cell.date;saving.current.add(pasteKey);setActive(null);setErr('');
+   try{await api<{updated:number}>('/effort-cells',{method:'POST',body:JSON.stringify({cells})});flash(`${cells.length} cells pasted`);refresh();}
+   catch(error){setErr((error as Error).message);}finally{saving.current.delete(pasteKey);}
+ }
+ function move(cell:{key:string;date:string;draft:string},event:KeyboardEvent<HTMLInputElement>){
+   if(event.key==='Escape'){event.preventDefault();setActive(null);return;}
+   if(!['Enter','Tab'].includes(event.key))return;
+   event.preventDefault();const rowNo=rowIndex.get(cell.key)||0,dayNo=days.indexOf(cell.date);
+   const nextRow=event.key==='Enter'?rowNo+(event.shiftKey?-1:1):rowNo;
+   const nextDay=event.key==='Tab'?dayNo+(event.shiftKey?-1:1):dayNo;
+   const row=rows[nextRow],date=days[nextDay];
+   void commitCell(cell,row&&date?{key:row.key,date}:undefined);
+ }
+ async function removeEntry(entry:Entry,userId:string){if(!window.confirm(`Delete ${entry.hours} h from ${entry.date}?`))return;
+   try{await api(`/entries/${encodeURIComponent(entry.id)}?userId=${encodeURIComponent(userId)}`,{method:'DELETE'});setDetails(null);refresh();flash('Entry removed');}
+   catch(error){setErr((error as Error).message);}
+ }
+ return <>
+ <div className="toolbar panel-toolbar"><div className="toolbar-left">
+   <select className="input short" aria-label="Engineer view" value={selectedUser} onChange={e=>onUser(e.target.value)}>
+     {isAdmin&&<option value="all">All engineers</option>}{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+   </select><div className="search-wrap"><Search size={15}/><input aria-label="Filter timesheet" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter engineer / task / status"/></div>
+ </div><div className="toolbar-right"><span className="subtle">{rows.length} rows · {allView?'Team':userMap.get(selectedUser)?.name||selectedUser}</span>
+   <button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
+   <button className="btn primary" onClick={()=>setEntryModal({userId:allView?users[0]?.id||'':selectedUser,date:today().startsWith(month)?today():days[0]||`${month}-01`})}><Plus size={14}/>Log effort</button>
+ </div></div>
+ {err&&<div className="error-msg" role="alert">{err} <button className="icon-btn" aria-label="Dismiss" onClick={()=>setErr('')}><X size={13}/></button></div>}
+ {editMode&&<div className="edit-rail">
+   <span><strong>EDIT MODE</strong> Click cells to type hours · Enter next row · Tab next day · paste TSV from Excel · Delete/0 clears cell</span>
+   {allView&&<select aria-label="New row engineer" className="input short" value={newPerson||users[0]?.id||''} onChange={e=>setNewPerson(e.target.value)}>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>}
+   <select className="input short" aria-label="New row kind" value={newKind} onChange={e=>setNewKind(e.target.value)}>{KINDS.map(k=><option key={k}>{k}</option>)}</select>
+   {newKind==='Task'&&<><select className="input short task-select" aria-label="New task row" value={newTask} onChange={e=>setNewTask(e.target.value)}><option value="">Choose task</option>{overview.tasks.map(t=><option key={t.id} value={t.id}>{t.id} · {t.name}</option>)}</select><select aria-label="New task role" className="input short" value={newRole} onChange={e=>setNewRole(e.target.value)}><option>EX</option><option>QC</option></select></>}
+   <button className="btn small" onClick={addRow}><Plus size={13}/>Add row</button>
+ </div>}
+ <section className="panel"><div className="panel-header"><h2>Monthly effort grid</h2><span className="subtle">Engineer · Status · Task ID · Role · {month} · EX / QC</span></div>
+ <div className="timesheet-scroll"><table className="timegrid excel-grid"><thead><tr>
+   <th className="excel-meta col-engineer" rowSpan={2}>Engineer</th><th className="excel-meta col-status" rowSpan={2}>Status</th>
+   <th className="excel-meta col-task" rowSpan={2}>Task ID</th><th className="excel-meta col-role" rowSpan={2}>Role</th><th className="excel-meta col-sum" rowSpan={2}>Total</th>
+   {days.map(d=><th key={d} className={`day-head ${isWeekend(d)?'weekend':''}`}>{new Date(`${d}T00:00:00`).toLocaleDateString('en',{weekday:'short'})}</th>)}
+ </tr><tr>{days.map(d=><th key={d} className={`date-head ${isWeekend(d)?'weekend':''}`} title={`${d.slice(-2)}.${d.slice(5,7)}.${d.slice(0,4)}`}>{d.slice(-2)}</th>)}</tr></thead>
+ <tbody><tr className="day-total-row"><td className="excel-meta col-engineer">TOTAL</td><td className="excel-meta col-status"/><td className="excel-meta col-task"/><td className="excel-meta col-role"/><td className="excel-meta col-sum num">{fmtHours(sum(entries))}</td>
+   {days.map(d=><td key={d} className={`day-cell ${isWeekend(d)?'weekend':''}`}><span className="day-total">{dayTotal(d)?fmtHours(dayTotal(d)):'·'}</span></td>)}
+ </tr>
+ {rows.map(row=><tr key={row.key}>
+   <td className="excel-meta col-engineer"><strong>{userMap.get(row.userId)?.name||row.userId}</strong></td>
+   <td className="excel-meta col-status" title={row.status}><Status value={row.status}/></td>
+   <td className="excel-meta col-task mono" title={row.taskId||row.kind}>{row.taskId||row.kind}</td>
+   <td className="excel-meta col-role">{row.role}</td><td className="excel-meta col-sum num strong">{fmtHours(sum(row.entries))}</td>
+   {days.map(date=>{const records=entriesFor(row,date),value=sum(records),isActive=active?.key===row.key&&active.date===date;
+     return <td className={`day-cell ${isWeekend(date)?'weekend':''} ${editMode?'editable-day':''}`} key={date}>
+       {isActive?<input autoFocus aria-label={`Edit ${row.userId} ${row.taskId||row.kind} ${date}`} className="excel-input" inputMode="decimal" value={active!.draft}
+         onFocus={e=>e.target.select()} onChange={e=>setActive(v=>v?{...v,draft:e.target.value}:v)}
+         onBlur={()=>void commitCell(active!)} onKeyDown={event=>move(active!,event)} onPaste={e=>void pasteCells(e,active!)}/>
+       :<button className={`excel-cell ${row.role==='QC'?'qc':row.kind==='Task'?'ex':'absence'} ${records.length>1?'multi-note':''}`}
+         title={records.length>1?'Multiple notes: view details to edit':`${row.userId} · ${date} · ${fmtHours(value)}h`}
+         onClick={()=>editMode?(records.length>1?setErr('Multiple records in this cell. Exit edit mode and view details.'):setActive({key:row.key,date,draft:value?fmtHours(value):''})):
+           (records.length?setDetails({entries:records,userId:row.userId}):setEntryModal({userId:row.userId,date}))}>
+         {value?fmtHours(value):editMode?'': '·'}
+       </button>}
+     </td>;
+   })}
+ </tr>)}
+ {!rows.length&&<tr><td className="empty" colSpan={days.length+5}>No entries yet. {editMode?'Choose a task and Add row.':'Select Log effort or import a workbook.'}</td></tr>}
+ </tbody></table></div>
+ <div className="table-footer"><span><i className="swatch blue"/>EX effort</span><span><i className="swatch teal"/>QC effort</span><span><i className="swatch gray"/>Other / leave</span>{editMode&&<span>Each change is saved to the server; cells with multiple notes are protected.</span>}</div>
+ </section>
+ {details&&<div className="modal-backdrop" onClick={()=>setDetails(null)}><section className="modal" role="dialog" aria-modal="true" onClick={e=>e.stopPropagation()}><div className="panel-header"><h2>Logged records · {details.entries[0]?.date}</h2><button className="icon-btn" aria-label="Close" onClick={()=>setDetails(null)}><X size={15}/></button></div><div className="panel-body">{details.entries.map(e=><div key={e.id} className="entry-detail"><div><strong>{fmtHours(e.hours)} h · {e.role==='NA'?e.kind:e.role}</strong><small>{e.note||e.task_id||'No note'}</small></div><button className="btn small" onClick={()=>void removeEntry(e,details.userId)}><Trash2 size={13}/>Delete</button></div>)}<div className="modal-actions"><button className="btn" onClick={()=>setDetails(null)}>Close</button><button className="btn primary" onClick={()=>{setEntryModal({date:details.entries[0]?.date||today(),userId:details.userId});setDetails(null);}}>Add entry</button></div></div></section></div>}
+ {entryModal&&<EntryEditor overview={overview} selectedUser={entryModal.userId} initialDate={entryModal.date} onClose={()=>setEntryModal(null)} onSaved={()=>{setEntryModal(null);refresh();flash('Effort saved');}}/>}
+ </>;
+}
+function parseTaskGridDate(raw:string):string {
+ const v=raw.trim();if(!v)return '';
+ if(/^\d{5}$/.test(v)){const d=new Date((Number(v)-25569)*86400000);return Number.isNaN(d.getTime())?'__invalid__':d.toISOString().slice(0,10);}
+ const match=v.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+ if(match)return `${match[3]}-${match[2]!.padStart(2,'0')}-${match[1]!.padStart(2,'0')}`;
+ return v;
+}
+function taskActual(t:Task,overview:Overview){return overview.taskActuals[t.id]||{ex:0,qc:0};}
+function fieldDisplay(t:Task,column:(typeof TRACKING_COLUMNS)[number],overview:Overview):string{
+ const actual=taskActual(t,overview);
+ switch(column.key){
+ case 'actual_ex_baseline':return fmtHours(t.actual_ex_baseline+actual.ex);
+ case 'actual_qc_baseline':return fmtHours(t.actual_qc_baseline+actual.qc);
+ case 'total_estimated':return fmtHours(t.estimated_ex+t.estimated_qc);
+ case 'total_actual':return fmtHours(t.actual_ex_baseline+t.actual_qc_baseline+actual.ex+actual.qc);
+ default:return String(t[column.key]??'');
+ }
+}
+function taskFieldChange(t:Task,column:(typeof TRACKING_COLUMNS)[number],raw:string,overview:Overview):Task{
+ if(column.type==='calculated'||column.key==='id')return t;
+ const key=column.key,clean=raw.trim();
+ let value:string|number=column.type==='number'?Number(clean||0):column.type==='date'?parseTaskGridDate(clean):clean;
+ if(typeof value==='number'&&(!Number.isFinite(value)||value<0))throw new Error(`${column.header}: value must be nonnegative`);
+ if(column.type==='date'&&value&&!/^\d{4}-\d{2}-\d{2}$/.test(String(value)))throw new Error(`${column.header}: use YYYY-MM-DD`);
+ if(key==='status'&&!STATUSES.includes(String(value) as (typeof STATUSES)[number]))throw new Error('Unsupported task status');
+ if(key==='actual_ex_baseline'||key==='actual_qc_baseline'){
+   const logged=taskActual(t,overview)[key==='actual_ex_baseline'?'ex':'qc'];
+   value=Number(value)-logged;
+   if(value<0)throw new Error(`${column.header}: cannot set below ${logged} h already logged via timesheet`);
+ }
+ return {...t,[key]:value};
 }
 function TaskEditor({initial,onClose,onSaved}:{initial:Omit<Task,'updated_at'>;onClose:()=>void;onSaved:()=>void}){
  const [task,setTask]=useState(initial),[saving,setSaving]=useState(false),[err,setErr]=useState('');
- function set<K extends keyof typeof task>(key:K,value:(typeof task)[K]){setTask(t=>({...t,[key]:value}));}
- async function submit(ev:FormEvent){ev.preventDefault();setSaving(true);setErr('');try{await api('/tasks',{method:'POST',body:JSON.stringify(task)});onSaved();}catch(e){setErr((e as Error).message);}finally{setSaving(false);}}
- return <div className="modal-backdrop" onClick={onClose}><section className="modal wide" onClick={e=>e.stopPropagation()} role="dialog" aria-modal="true"><div className="panel-header"><h2>{initial.id?'Edit task':'Add task'}</h2><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={17}/></button></div><form className="form-body" onSubmit={submit}>
- <div className="form-row"><label>Task ID<input className="input" required disabled={!!initial.id} value={task.id} onChange={e=>set('id',e.target.value)}/></label><label>Serial No.<input className="input" value={task.serial_no} onChange={e=>set('serial_no',e.target.value)}/></label></div>
- <div className="form-row"><label>IP No.<input className="input" value={task.ip_no} onChange={e=>set('ip_no',e.target.value)}/></label><label>Status<select className="input" value={task.status} onChange={e=>set('status',e.target.value)}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></label></div>
- <label>Task name<input className="input" value={task.name} onChange={e=>set('name',e.target.value)}/></label>
- <div className="form-row"><label>Estimated EX (h)<input className="input" type="number" min="0" step="0.25" value={task.estimated_ex} onChange={e=>set('estimated_ex',Number(e.target.value))}/></label><label>Estimated QC (h)<input className="input" type="number" min="0" step="0.25" value={task.estimated_qc} onChange={e=>set('estimated_qc',Number(e.target.value))}/></label></div>
- <div className="form-row"><label>Start date<input className="input" type="date" value={task.start_date} onChange={e=>set('start_date',e.target.value)}/></label><label>Completion date<input className="input" type="date" value={task.completion_date} onChange={e=>set('completion_date',e.target.value)}/></label></div>
- <label>Email subject<input className="input" value={task.email_subject} onChange={e=>set('email_subject',e.target.value)}/></label>{err&&<div className="error-msg">{err}</div>}
- <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving?'Saving…':'Save task'}</button></div></form></section></div>;
+ function change(key:keyof Task,value:string,type:string){setTask(t=>({...t,[key]:type==='number'?Number(value):value}));}
+ async function submit(event:FormEvent){event.preventDefault();setSaving(true);setErr('');try{await api('/tasks',{method:'POST',body:JSON.stringify(task)});onSaved();}catch(error){setErr((error as Error).message);}finally{setSaving(false);}}
+ return <div className="modal-backdrop" onClick={onClose}><section className="modal full-task-editor" role="dialog" aria-modal="true" aria-label="Task Tracking editor" onClick={e=>e.stopPropagation()}>
+   <div className="panel-header"><h2>{initial.id?'Edit task tracking':'New task tracking record'}</h2><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={17}/></button></div>
+   <form onSubmit={submit} className="form-body"><p className="subtle">32-column task model. Actual and QC effort entered here are historical baselines; recorded timesheet hours are added separately.</p>
+   <div className="task-editor-fields">{TRACKING_COLUMNS.filter(c=>c.type!=='calculated').map(c=><label key={c.key}>{c.header}
+     {c.key==='status'?<select className="input" value={task.status} onChange={e=>change('status',e.target.value,'text')}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>:
+     <input className="input" type={c.type==='date'?'date':c.type==='number'?'number':'text'} step={c.type==='number'?'0.25':undefined} min={c.type==='number'?'0':undefined}
+       disabled={c.key==='id'&&!!initial.id} required={c.key==='id'} value={String(task[c.key as keyof typeof task]??'')}
+       onChange={e=>change(c.key as keyof Task,e.target.value,c.type)}/>}
+   </label>)}</div>
+   {err&&<div className="error-msg" role="alert">{err}</div>}
+   <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving?'Saving…':'Save task'}</button></div>
+   </form>
+ </section></div>;
 }
 function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh:()=>void;flash:(s:string)=>void;month:string}){
- const [search,setSearch]=useState(''),[status,setStatus]=useState('All'),[editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null);
- const totals=overview.taskActuals;
- const filtered=overview.tasks.filter(t=>(status==='All'||status===t.status)&&`${t.id} ${t.name} ${t.ip_no} ${t.serial_no}`.toLowerCase().includes(search.toLowerCase()));
- return <><div className="toolbar panel-toolbar"><div className="toolbar-left"><div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search task / IP / serial"/></div><select className="input short" value={status} onChange={e=>setStatus(e.target.value)}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div><div className="toolbar-right"><span className="subtle">{filtered.length} of {overview.tasks.length} tasks</span>{overview.role==='admin'&&<button className="btn primary" onClick={()=>setEditing({...emptyTask})}><Plus size={15}/>Add task</button>}</div></div>
- <section className="panel"><div className="panel-header"><h2>Task register</h2><span className="subtle">Lifetime actuals for {overview.role==='admin'?'all engineers':'your entries (variance hidden)'} · estimates from catalog</span></div><div className="table-scroll task-table"><table><thead><tr><th>Status</th><th>Serial</th><th>IP No.</th><th>Task name</th><th>Task ID</th><th>Est. EX</th><th>Est. QC</th><th>Act. EX</th><th>Act. QC</th><th>Variance</th>{overview.role==='admin'&&<th/>}</tr></thead><tbody>{filtered.map(t=>{const actual=totals[t.id]||{ex:0,qc:0};const delta=actual.ex+actual.qc-t.estimated_ex-t.estimated_qc;return <tr key={t.id}><td><Status value={t.status}/></td><td className="mono">{t.serial_no}</td><td className="mono">{t.ip_no}</td><td><strong>{t.name}</strong>{t.email_subject&&<div className="subtle ellipsis" title={t.email_subject}>{t.email_subject}</div>}</td><td className="mono">{t.id}</td><td className="num">{fmtHours(t.estimated_ex)}</td><td className="num">{fmtHours(t.estimated_qc)}</td><td className="num">{fmtHours(actual.ex)}</td><td className="num">{fmtHours(actual.qc)}</td><td className={`num ${overview.role==='admin'&&delta>0?'over':''}`}>{overview.role==='admin'?`${delta>0?'+':''}${fmtHours(delta)}`:'—'}</td>{overview.role==='admin'&&<td><button className="btn small" onClick={()=>{const {updated_at,...rest}=t;setEditing(rest);}}>Edit</button></td>}</tr>;})}{!filtered.length&&<tr><td colSpan={11} className="empty">No tasks match the filters. Import the Tasks sheet or add a task.</td></tr>}</tbody></table></div></section>
- {editing&&<TaskEditor initial={editing} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);onRefresh();flash('Task saved');}}/>}</>;
+ const [search,setSearch]=useState(''),[status,setStatus]=useState('All');
+ const [editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null),[editMode,setEditMode]=useState(false);
+ const [active,setActive]=useState<{taskId:string;column:number;draft:string}|null>(null),[err,setErr]=useState('');
+ const saving=useRef(new Set<string>()),isAdmin=overview.role==='admin';
+ const filtered=overview.tasks.filter(t=>(status==='All'||status===t.status)&&`${t.id} ${t.name} ${t.ip_no} ${t.serial_no} ${t.series} ${t.revision} ${t.engineer} ${t.qc_engineer}`.toLowerCase().includes(search.toLowerCase()));
+ const display=(t:Task,col:number)=>fieldDisplay(t,TRACKING_COLUMNS[col]!,overview);
+ async function saveCell(cell:{taskId:string;column:number;draft:string},next?:{taskId:string;column:number}){
+   const task=filtered.find(t=>t.id===cell.taskId),column=TRACKING_COLUMNS[cell.column];if(!task||!column)return;
+   const unique=cell.taskId+'-'+cell.column;if(saving.current.has(unique))return;
+   let updated:Task;try{updated=taskFieldChange(task,column,cell.draft,overview);}catch(error){setErr((error as Error).message);return;}
+   setActive(next?{...next,draft:display(filtered.find(t=>t.id===next.taskId)!,next.column)}:null);
+   if(JSON.stringify(updated)===JSON.stringify(task))return;
+   saving.current.add(unique);setErr('');
+   try{const {updated_at,...payload}=updated;await api('/tasks',{method:'POST',body:JSON.stringify(payload)});flash('Task updated');onRefresh();}
+   catch(error){setErr((error as Error).message);}finally{saving.current.delete(unique);}
+ }
+ function moveCell(cell:{taskId:string;column:number;draft:string},event:KeyboardEvent<HTMLInputElement>){
+   if(event.key==='Escape'){setActive(null);return;}
+   if(!['Tab','Enter'].includes(event.key))return;
+   event.preventDefault();const rowIndex=filtered.findIndex(t=>t.id===cell.taskId);
+   const row=event.key==='Enter'?filtered[rowIndex+(event.shiftKey?-1:1)]:filtered[rowIndex];
+   const col=event.key==='Tab'?cell.column+(event.shiftKey?-1:1):cell.column;
+   const column=TRACKING_COLUMNS[col];
+   void saveCell(cell,row&&column&&column.type!=='calculated'&&column.key!=='id'?{taskId:row.id,column:col}:undefined);
+ }
+ async function pasteTracking(event:ClipboardEvent<HTMLInputElement>,cell:{taskId:string;column:number;draft:string}){
+   const text=event.clipboardData.getData('text/plain');if(!text.includes('\t')&&!text.includes('\n'))return;
+   event.preventDefault();const rows=text.replace(/\r/g,'').trimEnd().split('\n').map(line=>line.split('\t'));
+   const start=filtered.findIndex(t=>t.id===cell.taskId),updates=new Map<string,Task>();
+   for(let r=0;r<rows.length;r++)for(let c=0;c<(rows[r]?.length||0);c++){
+     const original=filtered[start+r],col=TRACKING_COLUMNS[cell.column+c];
+     if(!original||!col){setErr('Pasted range exceeds visible Task Tracking cells; nothing changed.');return;}
+     if(col.key==='id'||col.type==='calculated')continue;
+     const previous=updates.get(original.id)||original;
+     try{updates.set(original.id,taskFieldChange(previous,col,rows[r]?.[c]||'',overview));}
+     catch(error){setErr((error as Error).message);return;}
+   }
+   if(!updates.size)return;
+   const pasteKey=cell.taskId+'-'+cell.column;saving.current.add(pasteKey);setActive(null);setErr('');
+   try{const tasks=[...updates.values()].map(({updated_at,...task})=>task);await api('/tasks/bulk',{method:'POST',body:JSON.stringify({tasks})});flash(`${tasks.length} task rows updated`);onRefresh();}
+   catch(error){setErr((error as Error).message);}finally{saving.current.delete(pasteKey);}
+ }
+ return <><div className="toolbar panel-toolbar"><div className="toolbar-left"><div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search task, project, engineer"/></div>
+ <select className="input short" value={status} onChange={e=>setStatus(e.target.value)}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
+ <div className="toolbar-right"><span className="subtle">{filtered.length} / {overview.tasks.length} records · {TRACKING_COLUMNS.length} columns</span>
+ {isAdmin&&<><button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
+ <button className="btn primary" onClick={()=>setEditing({...emptyTask})}><Plus size={15}/>Add task</button></>}</div></div>
+ {err&&<div className="error-msg" role="alert">{err}<button className="icon-btn" onClick={()=>setErr('')} aria-label="Dismiss"><X size={13}/></button></div>}
+ {editMode&&<div className="edit-rail"><strong>EDIT MODE</strong> Click a field to edit · Tab/Enter navigate · paste Excel rows. Task ID and computed totals are read-only. Imported actual hours are historical baselines plus logged time.</div>}
+ <section className="panel"><div className="panel-header"><h2>Task Tracking</h2><span className="subtle">32 columns · scroll horizontally · dates YYYY-MM-DD · totals calculated</span></div>
+ <div className="table-scroll tracking-scroll"><table className="tracking-grid"><thead><tr>{TRACKING_COLUMNS.map(c=><th title={c.header} key={c.key}>{c.header}</th>)}{isAdmin&&<th>Actions</th>}</tr></thead><tbody>
+ {filtered.map(t=><tr key={t.id}>{TRACKING_COLUMNS.map((column,i)=>{
+   const isActive=active?.taskId===t.id&&active.column===i,editable=isAdmin&&editMode&&column.type!=='calculated'&&column.key!=='id';
+   return <td key={column.key} className={`${column.type==='number'||column.type==='calculated'?'num':''} ${column.key==='id'?'mono':''}`} title={column.header}>
+     {isActive?<input autoFocus className="tracking-input" aria-label={`${column.header} for ${t.id}`} type={column.type==='number'?'number':column.type==='date'?'date':'text'}
+        step={column.type==='number'?'0.25':undefined} value={active!.draft} onFocus={e=>e.target.select()}
+        onChange={e=>setActive(a=>a?{...a,draft:e.target.value}:a)} onBlur={()=>void saveCell(active!)}
+        onKeyDown={e=>moveCell(active!,e)} onPaste={e=>void pasteTracking(e,active!)}/>
+     :editable?<button className="tracking-cell" title={`${column.header}: click to edit`} onClick={()=>setActive({taskId:t.id,column:i,draft:display(t,i)})}>{column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}</button>
+     :column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}
+   </td>;
+ })}{isAdmin&&<td><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Details</button></td>}</tr>)}
+ {!filtered.length&&<tr><td colSpan={TRACKING_COLUMNS.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
+ </tbody></table></div></section>
+ {editing&&<TaskEditor initial={editing} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);onRefresh();flash('Task saved');}}/>}
+ </>;
 }
 function TeamPage({overview,month}:{overview:Overview;month:string}){
  const days=daysOfMonth(month),byUser=overview.users.map(u=>({user:u,entries:overview.entries.filter(e=>e.user_id===u.id)}));
@@ -100,22 +365,41 @@ function TeamPage({overview,month}:{overview:Overview;month:string}){
 function ExchangePage({isAdmin,refresh,flash,month,selectedUser}:{isAdmin:boolean;refresh:()=>void;flash:(s:string)=>void;month:string;selectedUser:string}){
  const [mode,setMode]=useState<'tasks'|'effort'>('effort'),[file,setFile]=useState<File|null>(null),[preview,setPreview]=useState<ImportPreview|null>(null),[busy,setBusy]=useState(false),[err,setErr]=useState(''),inputRef=useRef<HTMLInputElement|null>(null);
  async function importAction(commit:boolean){if(!file)return;setBusy(true);setErr('');try{if(commit){const response=await upload<{imported:number}>(`/import/commit?mode=${mode}`,file);flash(`${response.imported} records imported`);setPreview(null);setFile(null);if(inputRef.current)inputRef.current.value='';refresh();}else{setPreview(await upload<ImportPreview>(`/import/preview?mode=${mode}`,file));}}catch(e){setErr((e as Error).message);}finally{setBusy(false);}}
- return <><div className="two-col"><section className="panel"><div className="panel-header"><h2>Import workbook</h2><span className="status neutral">PREVIEW FIRST</span></div><div className="panel-body"><p className="muted">Use the Aventics Excel template. Preview all rows before writing to the internal server.</p><label>Import data type<select className="input" value={mode} onChange={e=>{setMode(e.target.value as 'tasks'|'effort');setPreview(null);}}><option value="effort">Daily effort entries (Effort sheet)</option>{isAdmin&&<option value="tasks">Task catalog (Tasks sheet)</option>}</select></label><label>Workbook (.xlsx)<input ref={inputRef} className="input file-input" type="file" accept=".xlsx" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);}}/></label><div className="button-line"><button className="btn" onClick={()=>void download('/template','aventics-timesheet-template.xlsx')}><Download size={15}/>Download template</button><button className="btn primary" disabled={!file||busy} onClick={()=>void importAction(false)}><Upload size={15}/>{busy?'Processing…':'Preview import'}</button></div>{err&&<div className="error-msg">{err}</div>}</div></section>
- <section className="panel"><div className="panel-header"><h2>Export data</h2><span className="subtle">Formatted .xlsx</span></div><div className="panel-body"><p className="muted">Export task details or your selected engineer's dated effort. Files are generated without modifying stored data.</p><div className="export-options">{isAdmin&&<div><div><strong>Task catalog</strong><small>All tasks, statuses and estimates</small></div><button className="btn small" onClick={()=>void download('/export?mode=tasks','aventics-tasks.xlsx')}><Download size={14}/>Export</button></div>}<div><div><strong>Effort · {month}</strong><small>Daily EX / QC / non-project entries</small></div><button className="btn small" onClick={()=>void download(`/export?mode=effort&month=${month}&userId=${selectedUser}`,'aventics-effort.xlsx')}><Download size={14}/>Export</button></div>{isAdmin&&<div><div><strong>All engineers · {month}</strong><small>Combined monthly effort report</small></div><button className="btn small" onClick={()=>void download(`/export?mode=effort&month=${month}&userId=all`,'aventics-team-effort.xlsx')}><Download size={14}/>Export</button></div>}</div></div></section></div>
+ return <><div className="two-col"><section className="panel"><div className="panel-header"><h2>Import workbook</h2><span className="status neutral">PREVIEW FIRST</span></div><div className="panel-body"><p className="muted">Use the Aventics Excel template. Preview all rows before writing to the internal server.</p><label>Import data type<select className="input" value={mode} onChange={e=>{setMode(e.target.value as 'tasks'|'effort');setPreview(null);}}><option value="effort">Timesheet · daily columns (Timesheet sheet)</option>{isAdmin&&<option value="tasks">Task Tracking · 32 columns (Task Tracking sheet)</option>}</select></label><label>Workbook (.xlsx)<input ref={inputRef} className="input file-input" type="file" accept=".xlsx" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);}}/></label><div className="button-line"><button className="btn" onClick={()=>void download(`/template?month=${month}`,'aventics-timesheet-template.xlsx')}><Download size={15}/>Download template</button><button className="btn primary" disabled={!file||busy} onClick={()=>void importAction(false)}><Upload size={15}/>{busy?'Processing…':'Preview import'}</button></div>{err&&<div className="error-msg">{err}</div>}</div></section>
+ <section className="panel"><div className="panel-header"><h2>Export data</h2><span className="subtle">Formatted .xlsx</span></div><div className="panel-body"><p className="muted">Export task details or your selected engineer's dated effort. Files are generated without modifying stored data.</p><div className="export-options">{isAdmin&&<div><div><strong>Task Tracking</strong><small>32 Task Tracking columns · historical + logged actuals</small></div><button className="btn small" onClick={()=>void download('/export?mode=tasks','aventics-task-tracking.xlsx')}><Download size={14}/>Export</button></div>}<div><div><strong>Timesheet · {month}</strong><small>Excel-style date columns + detailed entries</small></div><button className="btn small" onClick={()=>void download(`/export?mode=effort&month=${month}&userId=${selectedUser}`,'aventics-timesheet.xlsx')}><Download size={14}/>Export</button></div>{isAdmin&&<div><div><strong>All engineers · {month}</strong><small>Combined monthly effort report</small></div><button className="btn small" onClick={()=>void download(`/export?mode=effort&month=${month}&userId=all`,'aventics-team-timesheet.xlsx')}><Download size={14}/>Export</button></div>}</div></div></section></div>
  {preview&&<section className="panel"><div className="panel-header"><h2>Import preview</h2><span className="subtle">{preview.rows} data rows · {preview.errors.length} errors</span></div><div className="panel-body">{preview.errors.length?<div className="error-msg"><strong>Import blocked</strong>{preview.errors.slice(0,12).map((s,i)=><div key={i}>{s}</div>)}</div>:<div className="success-msg"><Check size={16}/>Validation passed. Confirm to write {preview.mode==='tasks'?preview.tasks.length:preview.entries.length} records.</div>}{preview.warnings.map((s,i)=><div className="warning-msg" key={i}>{s}</div>)}
  <div className="table-scroll preview-table"><table><thead><tr>{preview.mode==='tasks'?<><th>Task ID</th><th>Status</th><th>Est. EX</th><th>Est. QC</th></>:<><th>Date</th><th>Engineer</th><th>Task ID</th><th>Kind</th><th>Role</th><th>Hours</th></>}</tr></thead><tbody>{(preview.mode==='tasks'?preview.tasks:preview.entries).slice(0,15).map((r,i)=>preview.mode==='tasks'?<tr key={i}><td>{(r as Task).id}</td><td>{(r as Task).status}</td><td>{(r as Task).estimated_ex}</td><td>{(r as Task).estimated_qc}</td></tr>:<tr key={i}><td>{(r as Entry).date}</td><td>{(r as Entry).user_id}</td><td>{(r as Entry).task_id}</td><td>{(r as Entry).kind}</td><td>{(r as Entry).role}</td><td>{(r as Entry).hours}</td></tr>)}</tbody></table></div><div className="modal-actions"><span className="subtle">Showing first 15 rows</span><button className="btn primary" disabled={!!preview.errors.length||!preview.rows||busy} onClick={()=>void importAction(true)}>Confirm import</button></div></div></section>}
  <div className="note-line"><Database size={15}/> Data stays on your internal server. Imports are archived under the engineer's directory; task imports under shared/imports.</div></>;
 }
-function AdminPage({refresh,flash}:{refresh:()=>void;flash:(s:string)=>void}){
+function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:string)=>void;onBrandChanged:()=>void}){
  const [id,setId]=useState(''),[name,setName]=useState(''),[password,setPassword]=useState(''),[isAdmin,setIsAdmin]=useState(false),[busy,setBusy]=useState(false),[err,setErr]=useState('');
+ const [svg,setSvg]=useState<File|null>(null),[brandBusy,setBrandBusy]=useState(false),[brandError,setBrandError]=useState('');
+ const [hasCustom,setHasCustom]=useState(false);
+ useEffect(()=>{api<{custom:boolean}>('/branding/status').then(r=>setHasCustom(r.custom)).catch(()=>{});},[]);
+ async function updateBrand(reset:boolean){setBrandError('');setBrandBusy(true);
+  try{
+    if(reset){await api('/branding/supergraphic',{method:'DELETE'});setHasCustom(false);flash('Default supergraphic restored');}
+    else {if(!svg)throw new Error('Select your SVG file first');await upload('/branding/supergraphic',svg);setHasCustom(true);setSvg(null);flash('Custom supergraphic is now active');}
+    onBrandChanged();
+  }catch(error){setBrandError((error as Error).message);}finally{setBrandBusy(false);}
+ }
+
  async function save(e:FormEvent){e.preventDefault();setBusy(true);setErr('');try{await api('/users',{method:'POST',body:JSON.stringify({id,name,password,is_admin:isAdmin})});flash(`Engineer ${id} created`);setId('');setName('');setPassword('');setIsAdmin(false);refresh();}catch(e){setErr((e as Error).message);}finally{setBusy(false);}}
- return <section className="panel"><div className="panel-header"><h2>Create engineer</h2><span className="subtle">Admin only</span></div><form onSubmit={save} className="panel-body admin-form"><p className="muted">Each engineer receives an isolated server directory and SQLite file. Login credentials are set here.</p><div className="form-row"><label>Username / folder ID<input className="input" placeholder="duynk" pattern="[a-z0-9_-]+" value={id} onChange={e=>setId(e.target.value.toLowerCase())} required/></label><label>Display name<input className="input" placeholder="Engineer name" value={name} onChange={e=>setName(e.target.value)} required/></label></div><div className="form-row"><label>Initial password (12+ characters)<input className="input" type="password" minLength={12} value={password} onChange={e=>setPassword(e.target.value)} required/></label><label className="check-line"><input type="checkbox" checked={isAdmin} onChange={e=>setIsAdmin(e.target.checked)}/>Administrator access</label></div>{err&&<div className="error-msg">{err}</div>}<button className="btn primary" disabled={busy}><Plus size={15}/>Create engineer</button></form></section>;
+ return <><section className="panel"><div className="panel-header"><h2>Create engineer</h2><span className="subtle">Admin only</span></div><form onSubmit={save} className="panel-body admin-form"><p className="muted">Each engineer receives an isolated server directory and SQLite file. Login credentials are set here.</p><div className="form-row"><label>Username / folder ID<input className="input" placeholder="duynk" pattern="[a-z0-9_-]+" value={id} onChange={e=>setId(e.target.value.toLowerCase())} required/></label><label>Display name<input className="input" placeholder="Engineer name" value={name} onChange={e=>setName(e.target.value)} required/></label></div><div className="form-row"><label>Initial password (12+ characters)<input className="input" type="password" minLength={12} value={password} onChange={e=>setPassword(e.target.value)} required/></label><label className="check-line"><input type="checkbox" checked={isAdmin} onChange={e=>setIsAdmin(e.target.checked)}/>Administrator access</label></div>{err&&<div className="error-msg">{err}</div>}<button className="btn primary" disabled={busy}><Plus size={15}/>Create engineer</button></form></section>
+ <section className="panel"><div className="panel-header"><h2>Supergraphic · custom SVG</h2><span className="subtle">{hasCustom?'Custom asset active':'Suite default active'}</span></div>
+ <div className="panel-body"><p>Upload your own supergraphic SVG to replace the top 6 px accent strip across the site. It is stored under the internal server's shared branding folder and survives app updates.</p>
+ <div className="brand-upload"><input type="file" className="input file-input" accept=".svg,image/svg+xml" aria-label="Upload supergraphic SVG" onChange={e=>setSvg(e.target.files?.[0]||null)}/>
+ <button className="btn primary" disabled={!svg||brandBusy} onClick={()=>void updateBrand(false)}><Upload size={14}/>Apply SVG</button>
+ <button className="btn" disabled={!hasCustom||brandBusy} onClick={()=>void updateBrand(true)}>Restore default</button></div>
+ <p className="subtle">SVG only · max 256 KB · no scripts or external resources. The strip uses your image's full width.</p>
+ {brandError&&<div className="error-msg" role="alert">{brandError}</div>}</div></section></>;
 }
 export default function App(){
+ const [brandRevision,setBrandRevision]=useState(0);
  const [currentUser,setCurrentUser]=useState<Engineer|null>(null),[checking,setChecking]=useState(true),[page,setPage]=useState<Page>('overview'),[month,setMonth]=useState(isoMonth(new Date())),[selectedUser,setSelectedUser]=useState(''),[overview,setOverview]=useState<Overview|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const flash=(message:string)=>{setNotice(message);};
  useEffect(()=>{api<{user:Engineer}>('/auth/me').then(r=>{setCurrentUser(r.user);setSelectedUser(r.user.id);}).catch(()=>{}).finally(()=>setChecking(false));},[]);
- const refresh=useCallback(async()=>{if(!currentUser)return;setLoading(true);setError('');try{const r=await api<Overview>(`/overview?month=${month}`);setOverview(r);setSelectedUser(old=>r.users.some(u=>u.id===old)?old:(r.users[0]?.id||currentUser.id));}catch(e){setError((e as Error).message);}finally{setLoading(false);}},[currentUser,month]);
+ const refresh=useCallback(async()=>{if(!currentUser)return;setLoading(true);setError('');try{const r=await api<Overview>(`/overview?month=${month}`);setOverview(r);setSelectedUser(old=>(old==='all'&&currentUser.is_admin)||r.users.some(u=>u.id===old)?old:(r.users[0]?.id||currentUser.id));}catch(e){setError((e as Error).message);}finally{setLoading(false);}},[currentUser,month]);
  useEffect(()=>{void refresh();},[refresh]);
  useEffect(()=>{if(!currentUser)return;const id=window.setInterval(()=>{if(document.visibilityState==='visible')void refresh();},60000);return ()=>window.clearInterval(id);},[currentUser,refresh]);
  async function logout(){await api('/auth/logout',{method:'POST'}).catch(()=>{});setCurrentUser(null);setOverview(null);}
@@ -124,10 +408,10 @@ export default function App(){
  if(!currentUser)return <Login onDone={u=>{setCurrentUser(u);setSelectedUser(u.id);}}/>;
  const selected=overview?.users.find(u=>u.id===selectedUser);
  const pages=NAV.filter(([key])=>key!=='admin'||!!currentUser.is_admin);
- const meta={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task register','Track project tasks, estimates and actual effort'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
- return <div className="app-shell"><div className="accent-strip"/>
+ const meta={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task Tracking','32-column project task tracking with estimated and actual effort'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
+ return <div className="app-shell"><Supergraphic revision={brandRevision}/>
  <header className="topbar"><div className="brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Timesheet</strong></div></div><div className="header-context"><span className="header-label">ENGINEERING OPERATIONS</span><span className="header-divider"/><span className={error?"offline-dot":"online-dot"}/><span>{error?"Connection problem":"Internal server"}</span></div><div className="account"><div className="user-circle">{currentUser.name.slice(0,2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><small>{currentUser.is_admin?'Administrator':'Engineer'}</small></div><button className="icon-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div></header>
- <aside className="sidebar"><div className="sidebar-label">WORKSPACE</div><nav>{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS TIMESHEET</span><small>v0.1.0 · Web</small></div></aside>
+ <aside className="sidebar"><div className="sidebar-label">WORKSPACE</div><nav>{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS TIMESHEET</span><small>v0.2.0 · Web</small></div></aside>
  <main className="main"><div className="page-header"><div><div className="crumb">WORKSPACE <ChevronRight size={12}/> {meta[page][0].toUpperCase()}</div><h1>{meta[page][0]}</h1><p>{meta[page][1]}</p></div><div className="page-actions"><div className="month-picker"><button aria-label="Previous month" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button><input type="month" value={month} onChange={e=>setMonth(e.target.value)}/><button aria-label="Next month" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button></div><button className="btn small" onClick={()=>void refresh()} title="Refresh"><RefreshCw size={14}/>{loading?'Loading…':'Refresh'}</button></div></div>
  {notice&&<Notice message={notice} onClose={()=>setNotice('')}/>} {error&&<div className="error-msg">{error}</div>}
  {!overview?<div className="empty large">{loading?'Loading team data…':'No data available.'}</div>:<>
@@ -136,7 +420,7 @@ export default function App(){
  {page==='tasks'&&<TasksPage overview={overview} onRefresh={()=>void refresh()} flash={flash} month={month}/>}
  {page==='team'&&<TeamPage overview={overview} month={month}/>}
  {page==='exchange'&&<ExchangePage isAdmin={!!currentUser.is_admin} refresh={()=>void refresh()} flash={flash} month={month} selectedUser={selectedUser}/>}
- {page==='admin'&&!!currentUser.is_admin&&<AdminPage refresh={()=>void refresh()} flash={flash}/>}
+ {page==='admin'&&!!currentUser.is_admin&&<AdminPage refresh={()=>void refresh()} flash={flash} onBrandChanged={()=>setBrandRevision(x=>x+1)}/>}
  </>}</main><footer className="statusbar"><span><span className={error?"offline-dot":"online-dot"}/>{error?"API error":"Connected to internal API"}</span><span>{overview?.users.length??0} engineers · {overview?.tasks.length??0} registered tasks</span><span><LockKeyhole size={12}/> Local SQLite storage</span></footer>
  </div>;
 }
