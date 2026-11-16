@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode} from 'react';
-import {fmtHours} from './api';
+import {fmtHours, type Entry} from './api';
 
 export interface WorkGridRow {
   key: string;
@@ -8,7 +8,7 @@ export interface WorkGridRow {
   taskId: string;
   kind: string;
   role: string;
-  entries: Array<{hours: number}>;
+  entries: Entry[];
 }
 export interface GridCoordinate {row: number; day: number}
 export interface GridSelection {start: GridCoordinate; end: GridCoordinate}
