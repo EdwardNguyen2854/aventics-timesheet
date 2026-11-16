@@ -332,14 +332,14 @@ async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'|'workboo
     const sourceIds=[...listTasks().map(x=>x.id),...preview.tasks.map(x=>x.id)];
     const direct=new Map(sourceIds.map(id=>[id.toLowerCase(),id]));
     const alias=new Map<string,Set<string>>();
-    for(const id of sourceIds){const short=id.toLowerCase().match(/^\\d+-ip\\d+/)?.[0];
+    for(const id of sourceIds){const short=id.toLowerCase().match(/^\d+-ip\d+/)?.[0];
       if(short){const entries=alias.get(short)||new Set<string>();entries.add(id);alias.set(short,entries);}
     }
     const users=new Set(listUsers().map(u=>u.id));
     const missing=new Set<string>();let normalized=0;
     for(const entry of preview.entries){
       if(entry.kind==='Task'){
-        const raw=entry.task_id.trim(),prefix=raw.toLowerCase().match(/^\\d+-ip\\d+/)?.[0];
+        const raw=entry.task_id.trim(),prefix=raw.toLowerCase().match(/^\d+-ip\d+/)?.[0];
         const matches=prefix?alias.get(prefix):undefined;
         const id=direct.get(raw.toLowerCase())||(matches?.size===1?[...matches][0]:undefined);
         if(!id)preview.errors.push('Unknown or ambiguous Task ID: '+raw);

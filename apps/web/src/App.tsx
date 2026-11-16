@@ -336,6 +336,30 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
  const [editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null),[editMode,setEditMode]=useState(false);
  const [active,setActive]=useState<{taskId:string;column:number;draft:string}|null>(null),[err,setErr]=useState('');
  const saving=useRef(new Set<string>()),isAdmin=overview.role==='admin';
+ const [marks,setMarks]=useState<TrackingMark[]>([]);
+ const [markEditor,setMarkEditor]=useState<{scope:'cell'|'row'|'column';task_id:string;column_key:string;fill_color:string;text_color:string;pinned:boolean}|null>(null);
+ const [markBusy,setMarkBusy]=useState(false);
+ const reloadMarks=()=>api<TrackingMark[]>('/tracking-marks').then(setMarks).catch(e=>setErr((e as Error).message));
+ useEffect(()=>{void reloadMarks();},[]);
+ const marker=(scope:'cell'|'row'|'column',id='',column='')=>marks.find(m=>m.scope===scope&&m.task_id===id&&m.column_key===column);
+ const markFor=(id:string,column:string)=>marker('cell',id,column)||marker('row',id)||marker('column','',column);
+ const isPinnedCol=(column:string)=>!!marker('column','',column)?.pinned;
+ const freeze=(i:number):CSSProperties=>{
+   if(i<2||!isPinnedCol(TRACKING_COLUMNS[i]?.key||''))return {};
+   const pinnedBefore=TRACKING_COLUMNS.slice(2,i).filter(c=>isPinnedCol(c.key));
+   const left=widthOf(TRACKING_COLUMNS[0]!.key)+widthOf(TRACKING_COLUMNS[1]!.key)+pinnedBefore.reduce((acc,c)=>acc+widthOf(c.key),0);
+   return {position:'sticky',left,zIndex:4,background:'#fff'};
+ };
+ function openMark(scope:'cell'|'row'|'column',task_id='',column_key=''){
+   const old=marker(scope,task_id,column_key);
+   setMarkEditor({scope,task_id,column_key,fill_color:old?.fill_color||'',text_color:old?.text_color||'',pinned:!!old?.pinned});
+ }
+ async function saveMark(clear=false){if(!markEditor)return;setMarkBusy(true);try{
+   const keys={scope:markEditor.scope,task_id:markEditor.task_id,column_key:markEditor.column_key};
+   await api('/tracking-marks',{method:clear?'DELETE':'POST',body:JSON.stringify(clear?keys:markEditor)});
+   await reloadMarks();setMarkEditor(null);flash(clear?'Mark cleared':'Mark saved');
+ }catch(e){setErr((e as Error).message);}finally{setMarkBusy(false);}}
+
  const [columnWidths,setColumnWidths]=useState<Record<string,number>>(readStoredWidths);
  const scrollRef=useRef<HTMLDivElement>(null);
  const tableRef=useRef<HTMLTableElement>(null);
@@ -391,7 +415,7 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
    const node=scrollRef.current;if(!node)return;
    node.scrollBy({left:direction*Math.max(260,Math.round(node.clientWidth*.8)),behavior:'smooth'});
  }
- const filtered=overview.tasks.filter(t=>(status==='All'||status===t.status)&&`${t.id} ${t.name} ${t.ip_no} ${t.serial_no} ${t.series} ${t.revision} ${t.engineer} ${t.qc_engineer}`.toLowerCase().includes(search.toLowerCase()));
+ const filtered=overview.tasks.filter(t=>(status==='All'||status===t.status)&&`${t.id} ${t.name} ${t.ip_no} ${t.serial_no} ${t.series} ${t.revision} ${t.engineer} ${t.qc_engineer}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>Number(!!marker('row',b.id)?.pinned)-Number(!!marker('row',a.id)?.pinned));
  const display=(t:Task,col:number)=>fieldDisplay(t,TRACKING_COLUMNS[col]!,overview);
  async function saveCell(cell:{taskId:string;column:number;draft:string},next?:{taskId:string;column:number}){
    const task=filtered.find(t=>t.id===cell.taskId),column=TRACKING_COLUMNS[cell.column];if(!task||!column)return;
@@ -436,24 +460,40 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
  <button className="btn primary" onClick={()=>setEditing({...emptyTask})}><Plus size={15}/>Add task</button></>}</div></div>
  {err&&<div className="error-msg" role="alert">{err}<button className="icon-btn" onClick={()=>setErr('')} aria-label="Dismiss"><X size={13}/></button></div>}
  {editMode&&<div className="edit-rail"><strong>EDIT MODE</strong> Click a field to edit · Tab/Enter navigate · paste Excel rows. Task ID and computed totals are read-only. Imported actual hours are historical baselines plus logged time.</div>}
- <section className="panel"><div className="panel-header tracking-header"><div><h2>Task Tracking</h2><span className="subtle">Drag header borders to resize · scroll horizontally · double-click border to auto-fit a column</span></div><div className="tracking-tools"><button className="btn small" type="button" onClick={()=>scrollColumns(-1)} aria-label="Scroll columns left" title="Scroll columns left"><ChevronLeft size={15}/></button><button className="btn small" type="button" onClick={()=>scrollColumns(1)} aria-label="Scroll columns right" title="Scroll columns right"><ChevronRight size={15}/></button><button className="btn small" type="button" onClick={()=>setColumnWidths({})} title="Restore the default widths for all columns"><RotateCcw size={13}/>Reset widths</button></div></div>
+ <section className="panel"><div className="panel-header tracking-header"><div><h2>Task Tracking</h2><span className="subtle">Resize header borders · right-click any column or cell to pin, highlight or recolor</span></div><div className="tracking-tools"><button className="btn small" type="button" onClick={()=>scrollColumns(-1)} aria-label="Scroll columns left" title="Scroll columns left"><ChevronLeft size={15}/></button><button className="btn small" type="button" onClick={()=>scrollColumns(1)} aria-label="Scroll columns right" title="Scroll columns right"><ChevronRight size={15}/></button><button className="btn small" type="button" onClick={()=>setColumnWidths({})} title="Restore the default widths for all columns"><RotateCcw size={13}/>Reset widths</button></div></div>
  <div className="table-scroll tracking-scroll" ref={scrollRef} tabIndex={0} aria-label="Task Tracking table — use horizontal scrolling to see additional columns">
  <table ref={tableRef} className="tracking-grid" style={{width:totalWidth,'--tracking-first-width':`${widthOf(TRACKING_COLUMNS[0]!.key)}px`} as CSSProperties}>
  <colgroup>{TRACKING_COLUMNS.map(c=><col key={c.key} data-column-key={c.key} style={{width:widthOf(c.key)}}/>)}{isAdmin&&<col style={{width:112}}/>}</colgroup>
- <thead><tr>{TRACKING_COLUMNS.map(c=><th scope="col" title={c.header} key={c.key}><span className="tracking-heading">{c.header}</span><div className="tracking-resizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={MIN_TRACKING_WIDTH} aria-valuemax={MAX_TRACKING_WIDTH} aria-valuenow={widthOf(c.key)} aria-label={`Resize ${c.header} column`} title={`Drag to resize ${c.header} · double-click to auto-fit · arrow keys to resize`} onPointerDown={e=>beginResize(e,c.key)} onPointerMove={duringResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onDoubleClick={()=>autoFitColumn(c.key,TRACKING_COLUMNS.findIndex(column=>column.key===c.key))} onKeyDown={e=>resizeWithKeyboard(e,c.key)}/></th>)}{isAdmin&&<th scope="col">Actions</th>}</tr></thead><tbody>
- {filtered.map(t=><tr key={t.id}>{TRACKING_COLUMNS.map((column,i)=>{
+ <thead><tr>{TRACKING_COLUMNS.map((c,i)=><th scope="col" title={c.header+' · right-click to mark'} key={c.key} onContextMenu={e=>{e.preventDefault();openMark('column','',c.key);}} style={{...freeze(i),...(marker('column','',c.key)?.fill_color?{background:marker('column','',c.key)!.fill_color}:{}),...(marker('column','',c.key)?.text_color?{color:marker('column','',c.key)!.text_color}:{})}}><span className="tracking-heading">{marker('column','',c.key)?.pinned&&<Pin size={11}/>} {c.header}</span><div className="tracking-resizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={MIN_TRACKING_WIDTH} aria-valuemax={MAX_TRACKING_WIDTH} aria-valuenow={widthOf(c.key)} aria-label={`Resize ${c.header} column`} title={`Drag to resize ${c.header} · double-click to auto-fit · arrow keys to resize`} onPointerDown={e=>beginResize(e,c.key)} onPointerMove={duringResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onDoubleClick={()=>autoFitColumn(c.key,TRACKING_COLUMNS.findIndex(column=>column.key===c.key))} onKeyDown={e=>resizeWithKeyboard(e,c.key)}/></th>)}{isAdmin&&<th scope="col">Actions</th>}</tr></thead><tbody>
+ {filtered.map(t=><tr key={t.id} className={marker('row',t.id)?.pinned?'tracking-row-pinned':''}>{TRACKING_COLUMNS.map((column,i)=>{
    const isActive=active?.taskId===t.id&&active.column===i,editable=isAdmin&&editMode&&column.type!=='calculated'&&column.key!=='id';
-   return <td key={column.key} className={`${column.type==='number'||column.type==='calculated'?'num':''} ${column.key==='id'?'mono':''}`} title={display(t,i)||column.header}>
+   const mark=markFor(t.id,column.key);
+   return <td key={column.key} className={`${column.type==='number'||column.type==='calculated'?'num':''} ${column.key==='id'?'mono':''}`} title={(display(t,i)||column.header)+' · right-click to mark'}
+   onContextMenu={e=>{e.preventDefault();e.stopPropagation();openMark('cell',t.id,column.key);}}
+   style={{...freeze(i),...(mark?.fill_color?{background:mark.fill_color}:{}),...(mark?.text_color?{color:mark.text_color}:{})}}>
      {isActive?<input autoFocus className="tracking-input" aria-label={`${column.header} for ${t.id}`} type={column.type==='number'?'number':column.type==='date'?'date':'text'}
         step={column.type==='number'?'0.25':undefined} value={active!.draft} onFocus={e=>e.target.select()}
         onChange={e=>setActive(a=>a?{...a,draft:e.target.value}:a)} onBlur={()=>void saveCell(active!)}
         onKeyDown={e=>moveCell(active!,e)} onPaste={e=>void pasteTracking(e,active!)}/>
-     :editable?<button className="tracking-cell" title={`${column.header}: click to edit`} onClick={()=>setActive({taskId:t.id,column:i,draft:display(t,i)})}>{column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}</button>
-     :column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}
+     :editable?<button className="tracking-cell" title={`${column.header}: click to edit`} onClick={()=>setActive({taskId:t.id,column:i,draft:display(t,i)})}>{mark?.pinned&&<Pin size={11}/>} {column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}</button>
+     :column.key==='status'?<Status value={t.status}/>:<>{mark?.pinned&&<Pin size={11}/>} {display(t,i)||'·'}</>
    </td>;
- })}{isAdmin&&<td><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Details</button></td>}</tr>)}
+ })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Details</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
  {!filtered.length&&<tr><td colSpan={TRACKING_COLUMNS.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
  </tbody></table></div></section>
+ {markEditor&&<div className="modal-backdrop" onClick={()=>setMarkEditor(null)}><section className="modal mark-dialog" role="dialog" aria-modal="true" aria-label="Mark Task Tracking area" onClick={e=>e.stopPropagation()}>
+ <div className="panel-header"><h2><Palette size={16}/> Mark / pin {markEditor.scope}</h2><button className="icon-btn" onClick={()=>setMarkEditor(null)} aria-label="Close"><X size={15}/></button></div>
+ <div className="panel-body">
+ <p className="subtle">Private per-user marker · {markEditor.task_id||'every task'} · {markEditor.column_key||'every column'}</p>
+ <label>Highlight<select className="input" value={markEditor.fill_color} onChange={e=>setMarkEditor(v=>v?{...v,fill_color:e.target.value}:v)}>
+ <option value="">None</option><option value="#e7f2f1">Green</option><option value="#fff4d6">Yellow</option><option value="#e5f3f8">Blue</option><option value="#fde8e9">Red</option>
+ </select></label>
+ <label>Text color<select className="input" value={markEditor.text_color} onChange={e=>setMarkEditor(v=>v?{...v,text_color:e.target.value}:v)}>
+ <option value="">Default</option><option value="#0e625e">Green</option><option value="#865600">Amber</option><option value="#004975">Blue</option><option value="#ac2027">Red</option>
+ </select></label>
+ <label className="check-line"><input type="checkbox" checked={markEditor.pinned} onChange={e=>setMarkEditor(v=>v?{...v,pinned:e.target.checked}:v)}/>Pin {markEditor.scope}</label>
+ <div className="modal-actions"><button className="btn" disabled={markBusy} onClick={()=>void saveMark(true)}>Clear</button><button className="btn primary" disabled={markBusy} onClick={()=>void saveMark(false)}>Save mark</button></div>
+ </div></section></div>}
  {editing&&<TaskEditor initial={editing} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);onRefresh();flash('Task saved');}}/>}
  </>;
 }

@@ -131,3 +131,12 @@
 .timegrid .day-total-row .day-cell:not(.has-effort){background:#f4f5f6}
 .timegrid .day-total-row .day-cell.has-effort .day-total{color:inherit}
 .heat-legend{display:inline-flex;align-items:center;padding:3px 8px;border:1px solid #bed8c5;min-height:24px;font-size:10px}
+
+.tracking-row-actions{display:flex;align-items:center;gap:4px}
+.tracking-row-pinned td:first-child{box-shadow:inset 3px 0 var(--av-blue)}
+.tracking-heading svg,.tracking-cell svg,.tracking-grid td>svg{vertical-align:middle;margin-right:4px}
+.mark-dialog{max-width:510px}
+.mark-dialog .panel-header h2{display:flex;align-items:center;gap:8px}
+.mark-dialog .panel-body{display:grid;gap:14px}
+.mark-dialog label:not(.check-line){display:grid;gap:5px;font-size:11px;font-weight:650}
+.mark-dialog .check-line{display:flex;align-items:center;gap:8px}
