@@ -24,3 +24,14 @@ jobs:
         run: npm run build
       - name: Excel and SQLite integration test
         run: node --test tests/integration.test.mjs
+
+      - name: Pack source snapshot
+        if: github.ref == 'refs/heads/release/v0.4.0'
+        run: git archive HEAD | gzip -9 > worktrack-source.tgz
+      - name: Upload source snapshot
+        if: github.ref == 'refs/heads/release/v0.4.0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: worktrack-source
+          path: worktrack-source.tgz
+          retention-days: 1
