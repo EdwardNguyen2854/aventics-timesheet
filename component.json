@@ -1,0 +1,11 @@
+{
+  "schemaVersion":"1",
+  "id":"aventics.timesheet",
+  "version":"0.1.0",
+  "kind":"web",
+  "entry":"node",
+  "args":["apps/server/dist/index.js"],
+  "cwd":".",
+  "url":"http://127.0.0.1:4177/api/health",
+  "notes":"Development descriptor. Node.js runtime is not yet bundled; service must be reverse-proxied and initialized with secure config."
+}
