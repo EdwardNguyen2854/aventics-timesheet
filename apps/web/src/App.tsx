@@ -476,7 +476,7 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
         onChange={e=>setActive(a=>a?{...a,draft:e.target.value}:a)} onBlur={()=>void saveCell(active!)}
         onKeyDown={e=>moveCell(active!,e)} onPaste={e=>void pasteTracking(e,active!)}/>
      :editable?<button className="tracking-cell" title={`${column.header}: click to edit`} onClick={()=>setActive({taskId:t.id,column:i,draft:display(t,i)})}>{mark?.pinned&&<Pin size={11}/>} {column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}</button>
-     :column.key==='status'?<Status value={t.status}/>:<>{mark?.pinned&&<Pin size={11}/>} {display(t,i)||'·'}</>
+     :column.key==='status'?<Status value={t.status}/>:<>{mark?.pinned&&<Pin size={11}/>} {display(t,i)||'·'}</>}
    </td>;
  })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Details</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
  {!filtered.length&&<tr><td colSpan={TRACKING_COLUMNS.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
