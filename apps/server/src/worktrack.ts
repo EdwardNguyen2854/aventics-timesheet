@@ -62,7 +62,7 @@ export function getAudit(userId:string,isAdmin:boolean,taskId?:string,limit=100)
 export function taskDetail(taskId:string,viewer:string,isAdmin:boolean){
  const task=central.prepare('SELECT * FROM tasks WHERE id=?').get(taskId) as Task|undefined;
  if(!task)return null;
- const actuals=taskEffortBreakdown().filter(r=>r.task_id===taskId);
+ const actuals=taskEffortBreakdown().filter(r=>r.task_id===taskId&&(isAdmin||r.user_id===viewer));
  const entries:Array<Entry&{user_id:string}>=[];
  for(const user of (isAdmin?listUsers().map(u=>u.id):[viewer])){
   const rows=userDb(user).prepare('SELECT * FROM entries WHERE task_id=? ORDER BY date DESC LIMIT 2000').all(taskId) as Entry[];

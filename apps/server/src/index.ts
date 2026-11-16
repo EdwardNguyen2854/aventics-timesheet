@@ -42,7 +42,7 @@ app.addHook('preHandler',async (request)=>{
 });
 app.get('/api/health',async()=>({status:'ok',app:'aventics-work-desk',version:'0.3.0'}));
 app.post('/api/auth/login',async(req,reply)=>{
-  if(req.headers['x-requested-with']!=='aventics-timesheet')throw httpError('Invalid request origin',403);
+  if(!['aventics-timesheet','aventics-worktrack'].includes(String(req.headers['x-requested-with']||'')))throw httpError('Invalid request origin',403);
   const input=z.object({username:z.string().min(1).max(64),password:z.string().min(1).max(256)}).parse(req.body);
   const row=central.prepare('SELECT id,password_hash,active FROM users WHERE id=?').get(input.username.trim().toLowerCase()) as {id:string,password_hash:string,active:number}|undefined;
   if(!row||!row.active||!verifyPassword(input.password,row.password_hash))throw httpError('Invalid username or password',401);
@@ -137,11 +137,11 @@ app.post('/api/tasks',async(req)=>{
 });
 app.post('/api/tasks/bulk',async(req)=>{
  guardAdmin(req);
- const {tasks}=z.object({tasks:z.array(taskSchema).min(1).max(500)}).parse(req.body);
+ const {tasks}=z.object({tasks:z.array(taskSchema.extend({expected_updated_at:z.string().optional()})).min(1).max(500)}).parse(req.body);
  const seen=new Set<string>();for(const task of tasks){
    if(seen.has(task.id))throw httpError('Repeated Task ID in paste');seen.add(task.id);validateTaskDates(task);
  }
- central.transaction(()=>{for(const task of tasks)writeTaskWithAudit(task,actor(req).id);})();
+ central.transaction(()=>{for(const task of tasks){const {expected_updated_at,...payload}=task;writeTaskWithAudit(payload,actor(req).id,expected_updated_at);}})();
  return {ok:true,updated:tasks.length};
 });
 app.get('/api/overview',async(req)=>{

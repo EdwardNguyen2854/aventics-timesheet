@@ -34,6 +34,30 @@ test('full workbook template parses and task, estimate and effort persist separa
    assert.equal(db.listTaskEstimates().length,1);
    assert.ok(existsSync(join(root,'users','duynk','effort.sqlite')));
    assert.ok(existsSync(join(root,'shared','catalog.sqlite')));
+   const operations=await import('../apps/server/dist/worktrack.js');
+   operations.initializeWorktrack();
+   const current=db.listTasks().find(t=>t.id===task.id);
+   assert.ok(current?.updated_at);
+   operations.writeTaskWithAudit({...task,status:'In progress'},'duynk',current.updated_at);
+   assert.equal(db.listTasks().find(t=>t.id===task.id).status,'In progress');
+   assert.throws(()=>operations.writeTaskWithAudit(task,'duynk','outdated-token'),/modified/);
+   operations.auditEntry('duynk','duynk',entry.id,'create',null,entry);
+   operations.setAlias('3614-ip1614_series: ug',task.id,'duynk');
+   assert.equal(operations.listAliases()[0].task_id,task.id);
+   operations.setSavedView('duynk','task-tracking',{density:'compact',hidden:['revision']});
+   assert.equal(JSON.parse(operations.savedViews('duynk')[0].config_json).hidden[0],'revision');
+   const report=operations.varianceReport('duynk',true).find(r=>r.task_id===task.id);
+   assert.equal(report.actual_ex,3);
+   assert.equal(report.estimated,task.estimated_ex+task.estimated_qc);
+   const backup=await operations.backupAll();
+   assert.equal(backup.manifest.files.length,2);
+   for(const file of backup.manifest.files)assert.ok(existsSync(join(root,'backups',backup.id,file.path)));
+   assert.equal(operations.listBackups().length,1);
+   const importId=operations.beginImport('duynk','workbook',Buffer.from('fixture'),1,2,backup.id);
+   operations.updateImport(importId,'completed',['duynk']);
+   assert.equal(operations.listImports()[0].backup_id,backup.id);
+   assert.ok(operations.getAudit('duynk',true).taskEvents.length>=2);
+
  } finally{
    db.closeDbs();
    rmSync(root,{recursive:true,force:true});

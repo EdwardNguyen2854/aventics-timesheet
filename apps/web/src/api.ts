@@ -33,7 +33,7 @@ export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tas
 export const KINDS=['Task','Meeting/Training','Public Holiday','Full-day Leave','Half-day Leave - 1st','Half-day Leave - 2nd','Other'] as const;
 export const STATUSES=['Not started','In progress','Sent to QC','Completed','On hold','Cancelled'] as const;
 export async function api<T>(path:string,init:RequestInit={}):Promise<T>{
- const res=await fetch(`/api${path}`,{credentials:'include',...init,headers:{...(init.body instanceof FormData?{}:{'Content-Type':'application/json'}),'X-Requested-With':'aventics-timesheet',...init.headers}});
+ const res=await fetch(`/api${path}`,{credentials:'include',...init,headers:{...(init.body instanceof FormData?{}:{'Content-Type':'application/json'}),'X-Requested-With':'aventics-worktrack',...init.headers}});
  if(!res.ok){let data:{error?:string}={};try{data=await res.json();}catch{}throw new Error(data.error||`HTTP ${res.status}`);}
  return res.json() as Promise<T>;
 }

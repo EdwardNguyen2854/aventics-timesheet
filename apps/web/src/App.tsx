@@ -322,10 +322,10 @@ function taskFieldChange(t:Task,column:(typeof TRACKING_COLUMNS)[number],raw:str
  }
  return {...t,[key]:value};
 }
-function TaskEditor({initial,onClose,onSaved}:{initial:Omit<Task,'updated_at'>;onClose:()=>void;onSaved:()=>void}){
+function TaskEditor({initial,onClose,onSaved,revision}:{initial:Omit<Task,'updated_at'>;onClose:()=>void;onSaved:()=>void;revision?:string}){
  const [task,setTask]=useState(initial),[saving,setSaving]=useState(false),[err,setErr]=useState('');
  function change(key:keyof Task,value:string,type:string){setTask(t=>({...t,[key]:type==='number'?Number(value):value}));}
- async function submit(event:FormEvent){event.preventDefault();setSaving(true);setErr('');try{await api('/tasks',{method:'POST',body:JSON.stringify(task)});onSaved();}catch(error){setErr((error as Error).message);}finally{setSaving(false);}}
+ async function submit(event:FormEvent){event.preventDefault();setSaving(true);setErr('');try{await api('/tasks',{method:'POST',body:JSON.stringify({...task,...(revision?{expected_updated_at:revision}:{})})});onSaved();}catch(error){setErr((error as Error).message);}finally{setSaving(false);}}
  return <div className="modal-backdrop" onClick={onClose}><section className="modal full-task-editor" role="dialog" aria-modal="true" aria-label="Task Tracking editor" onClick={e=>e.stopPropagation()}>
    <div className="panel-header"><h2>{initial.id?'Edit task tracking':'New task tracking record'}</h2><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={17}/></button></div>
    <form onSubmit={submit} className="form-body"><p className="subtle">32-column task model. Actual and QC effort entered here are historical baselines; recorded timesheet hours are added separately.</p>
@@ -372,7 +372,7 @@ function readStoredWidths():Record<string,number>{
 }
 function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overview;onRefresh:()=>void;flash:(s:string)=>void;month:string;onOpenTask:(id:string)=>void}){
  const [search,setSearch]=useState(''),[status,setStatus]=useState('All');
- const [editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null),[editMode,setEditMode]=useState(false);
+ const [editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null),[editTimestamp,setEditTimestamp]=useState(''),[editMode,setEditMode]=useState(false);
  const [active,setActive]=useState<{taskId:string;column:number;draft:string}|null>(null),[err,setErr]=useState('');
  const saving=useRef(new Set<string>()),isAdmin=overview.role==='admin';
  const [marks,setMarks]=useState<TrackingMark[]>([]);
@@ -525,14 +525,14 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
    }
    if(!updates.size)return;
    const pasteKey=cell.taskId+'-'+cell.column;saving.current.add(pasteKey);setActive(null);setErr('');
-   try{const tasks=[...updates.values()].map(({updated_at,...task})=>task);await api('/tasks/bulk',{method:'POST',body:JSON.stringify({tasks})});flash(`${tasks.length} task rows updated`);onRefresh();}
+   try{const tasks=[...updates.values()].map(({updated_at,...task})=>({...task,expected_updated_at:updated_at}));await api('/tasks/bulk',{method:'POST',body:JSON.stringify({tasks})});flash(`${tasks.length} task rows updated`);onRefresh();}
    catch(error){setErr((error as Error).message);}finally{saving.current.delete(pasteKey);}
  }
  return <><div className="toolbar panel-toolbar"><div className="toolbar-left"><div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search task, project, engineer"/></div>
  <select className="input short" value={status} onChange={e=>setStatus(e.target.value)}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
  <div className="toolbar-right"><span className="subtle">{filtered.length} / {overview.tasks.length} records · {visibleColumns.length} of {TRACKING_COLUMNS.length} columns</span>
  {isAdmin&&<><button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
- <button className="btn primary" onClick={()=>setEditing({...emptyTask})}><Plus size={15}/>Add task</button></>}</div></div>
+ <button className="btn primary" onClick={()=>{setEditTimestamp('');setEditing({...emptyTask});}}><Plus size={15}/>Add task</button></>}</div></div>
  {err&&<div className="error-msg" role="alert">{err}<button className="icon-btn" onClick={()=>setErr('')} aria-label="Dismiss"><X size={13}/></button></div>}
  {editMode&&<div className="edit-rail"><strong>EDIT MODE</strong> Click a field to edit · Tab/Enter navigate · paste Excel rows. Task ID and computed totals are read-only. Imported actual hours are historical baselines plus logged time.</div>}
  <section className="panel"><div className="panel-header tracking-header"><div><h2>Task Tracking</h2><span className="subtle">Resize header borders · right-click any column or cell to pin, highlight or recolor</span></div><div className="tracking-tools"><button className="btn small" type="button" onClick={()=>scrollColumns(-1)} aria-label="Scroll columns left" title="Scroll columns left"><ChevronLeft size={15}/></button><button className="btn small" type="button" onClick={()=>scrollColumns(1)} aria-label="Scroll columns right" title="Scroll columns right"><ChevronRight size={15}/></button><details className="wt-column-picker"><summary className="btn small">Columns</summary><div className="wt-column-options">{orderedColumns.map(c=><div key={c.key} className="wt-column-option"><label><input type="checkbox" checked={!hiddenColumns.includes(c.key)||['serial_no','ip_no','id'].includes(c.key)} disabled={['serial_no','ip_no','id'].includes(c.key)} onChange={e=>setHiddenColumns(prev=>e.target.checked?prev.filter(x=>x!==c.key):[...prev,c.key])}/>{c.header}</label><button className="icon-btn" aria-label={'Move '+c.header+' left'} disabled={['serial_no','ip_no'].includes(c.key)} onClick={()=>moveColumn(c.key,-1)}>‹</button><button className="icon-btn" aria-label={'Move '+c.header+' right'} disabled={['serial_no','ip_no'].includes(c.key)} onClick={()=>moveColumn(c.key,1)}>›</button></div>)}</div></details>
@@ -556,7 +556,7 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
      :editable?<button className="tracking-cell" title={`${column.header}: click to edit`} onClick={()=>setActive({taskId:t.id,column:i,draft:display(t,i)})}>{mark?.pinned&&<Pin size={11}/>} {column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}</button>
      :column.key==='status'?<Status value={t.status}/>:<>{mark?.pinned&&<Pin size={11}/>} {display(t,i)||'·'}</>}
    </td>;
- })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>onOpenTask(t.id)}>Open</button><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Edit</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
+ })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>onOpenTask(t.id)}>Open</button><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditTimestamp(updated_at);setEditing(initial);}}>Edit</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
  {!filtered.length&&<tr><td colSpan={visibleColumns.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
  </tbody></table></div></section>
  {markEditor&&<div className="modal-backdrop" onClick={()=>setMarkEditor(null)}><section className="modal mark-dialog" role="dialog" aria-modal="true" aria-label="Mark Task Tracking area" onClick={e=>e.stopPropagation()}>
@@ -572,7 +572,7 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
  <label className="check-line"><input type="checkbox" checked={markEditor.pinned} onChange={e=>setMarkEditor(v=>v?{...v,pinned:e.target.checked}:v)}/>Pin {markEditor.scope}</label>
  <div className="modal-actions"><button className="btn" disabled={markBusy} onClick={()=>void saveMark(true)}>Clear</button><button className="btn primary" disabled={markBusy} onClick={()=>void saveMark(false)}>Save mark</button></div>
  </div></section></div>}
- {editing&&<TaskEditor initial={editing} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);onRefresh();flash('Task saved');}}/>}
+ {editing&&<TaskEditor initial={editing} revision={editTimestamp} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);onRefresh();flash('Task saved');}}/>}
  </>;
 }
 
