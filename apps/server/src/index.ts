@@ -25,8 +25,9 @@ function canReadUser(r:FastifyRequest,userId:string){if(!actor(r).is_admin && ac
 function httpError(message:string,statusCode=400){return Object.assign(new Error(message),{statusCode});}
 app.setErrorHandler((err,req,reply)=>{
   req.log.error(err);
-  const code=err instanceof ZodError?400:typeof err.statusCode==='number'&&err.statusCode>=400&&err.statusCode<500?err.statusCode:500;
-  reply.status(code).send({error:err instanceof ZodError?err.issues.map(i=>i.path.join('.')+': '+i.message).join('; '):code===500?'Internal server error':err.message});
+  const error=err as Error & {statusCode?:number};
+  const code=err instanceof ZodError?400:typeof error.statusCode==='number'&&error.statusCode!>=400&&error.statusCode!<500?error.statusCode!:500;
+  reply.status(code).send({error:err instanceof ZodError?err.issues.map(i=>i.path.join('.')+': '+i.message).join('; '):code===500?'Internal server error':error.message});
 });
 app.addHook('preHandler',async (request)=>{
   if(!request.url.startsWith('/api/')||request.url==='/api/auth/login'||request.url==='/api/health'||request.url.startsWith('/api/branding/')&&request.method==='GET')return;
@@ -154,11 +155,15 @@ const brandDir=join(DATA_ROOT,'shared','branding');
 const supergraphicPath=join(brandDir,'supergraphic.svg');
 function validateSupergraphicSvg(text:string):void {
  if(text.length>256*1024 || !/^\s*(?:<\?xml[^>]*>\s*)?<svg\s[\s\S]*<\/svg>\s*$/i.test(text))throw httpError('Provide an SVG image smaller than 256 KB');
- if(/<\s*(?:script|foreignObject|iframe|object|embed|image|use|link|audio|video|animate|set|feImage|style)\b/i.test(text)
-  ||/\bon[a-z]+\s*=/i.test(text)||/\b(?:href|xlink:href)\s*=\s*['"](?!#)/i.test(text)
-  ||/\b(?:href|xlink:href)\s*=\s*[^'"\s>]/i.test(text)
-  ||/\b(?:javascript:|data:|https?:|file:|@import|<!DOCTYPE|<!ENTITY|<\?xml-stylesheet)\b/i.test(text)
-  ||/url\(\s*['"]?(?!#)/i.test(text))throw httpError('SVG includes external, active or unsafe content');
+ // Reject active tags, event handlers, external references and entities.
+ if(/<\s*(?:script|foreignObject|iframe|object|embed|image|link|audio|video|animate|set|feImage)\b/i.test(text)
+  ||/\bon[a-z]+\s*=/i.test(text)||/\b(?:href|xlink:href)\s*=\s*['\"](?!#)/i.test(text)
+  ||/\b(?:href|xlink:href)\s*=\s*[^'\"\s>]/i.test(text))throw httpError('SVG includes active or unsafe content');
+ // SVG namespace URLs are not external dependencies; leave only those untouched.
+ const withoutNamespaces=text.replace(/\sxmlns(?::xlink)?\s*=\s*(['\"])http:\/\/www\.w3\.org\/(?:2000\/svg|1999\/xlink)\1/gi,'');
+ const withoutFragmentUrls=withoutNamespaces.replace(/url\(\s*(?:['\"]#[^'\")]+['\"]|#[^)]+)\s*\)/gi,'');
+ if(/(?:javascript:|data:|https?:|file:|@import|<!DOCTYPE|<!ENTITY|<\?xml-stylesheet)/i.test(withoutFragmentUrls)
+  ||/url\s*\(/i.test(withoutFragmentUrls))throw httpError('SVG includes an external resource or unsafe XML construct');
 }
 app.get('/api/branding/status',async()=>({custom:existsSync(supergraphicPath)}));
 app.get('/api/branding/supergraphic.svg',async(_req,reply)=>{

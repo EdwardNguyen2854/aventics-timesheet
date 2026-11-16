@@ -70,7 +70,7 @@ function excelDate(c:ExcelJS.Cell):string {
  }
  const s=cellText(c);
  if(!s)return '';
- if(validIsoDate(s))return s;
+ if(validIsoDate(String(s)))return s;
  if(/^\d{5}$/.test(s))return excelDate({value:Number(s)} as ExcelJS.Cell);
  const m=s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
  if(m){const iso=`${m[3]}-${m[2]!.padStart(2,'0')}-${m[1]!.padStart(2,'0')}`;return validIsoDate(iso)?iso:'__invalid_date__';}
