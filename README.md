@@ -1,4 +1,4 @@
-# Aventics Work Desk
+# Aventics WorkTrack
 
 **Aventics Suite** · internal engineering work management · v0.3.0 (development build)
 
@@ -35,7 +35,7 @@ Use **Import / Export → Full workbook** and select your private Excel workbook
 2. Select the original workbook; click **Preview import**. Review errors/warnings and the task/effort counts.
 3. Click **Confirm import**. The app writes task metadata to `shared/catalog.sqlite` and dated entries to `users/<username>/effort.sqlite`.
 4. In **Administration → Engineer access**, reset passwords and activate provisioned accounts.
-5. In **Estimation & Lookup**, upload your private `aventics-work-desk-private-effort-lookup.json` file, or add/edit rates manually.
+5. In **Estimation & Lookup**, upload your private `aventics-worktrack-private-effort-lookup.json` file, or add/edit rates manually.
 
 **No raw internal data is committed in this public GitHub repository.** The GitHub deployment cannot directly modify a SQLite database on your workstation or corporate server; this import runs on the server after your explicit confirmation.
 
@@ -61,10 +61,10 @@ Re-imports update matching daily records. Dates without positive effort are not 
 
 ## Source repository rename
 
-Product name and manifest have been updated to **Aventics Work Desk** (desired repository: `EdwardNguyen2854/aventics-work-desk`). The connected GitHub API does not include repository-administration/rename. The owner must rename the existing repository under GitHub **Settings → General → Repository name**. GitHub normally redirects existing clone URLs, but update your local `origin` after renaming:
+Product name and manifest have been updated to **Aventics WorkTrack** (desired repository: `EdwardNguyen2854/aventics-worktrack`). The connected GitHub API does not include repository-administration/rename. The owner must rename the existing repository under GitHub **Settings → General → Repository name**. GitHub normally redirects existing clone URLs, but update your local `origin` after renaming:
 
 ```powershell
-git remote set-url origin https://github.com/EdwardNguyen2854/aventics-work-desk.git
+git remote set-url origin https://github.com/EdwardNguyen2854/aventics-worktrack.git
 ```
 
 Do not create a second independent copy: rename the existing repository to preserve history, issues and Actions.

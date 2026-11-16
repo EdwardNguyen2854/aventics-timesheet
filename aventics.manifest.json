@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1",
-  "id": "aventics.work-desk",
-  "name": "Aventics Work Desk",
-  "version": "0.3.0",
+  "id": "aventics.worktrack",
+  "name": "Aventics WorkTrack",
+  "version": "0.4.0",
   "type": "app",
   "maturity": "incubating",
   "capabilities": [

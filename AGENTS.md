@@ -1,8 +1,8 @@
-# Aventics Work Desk — Agent Notes
+# Aventics WorkTrack — Agent Notes
 
 Suite agent baseline: 2 (2026-11)
 
-- Component: `aventics.work-desk` · `app` · `incubating`
+- Component: `aventics.worktrack` · `app` · `incubating`
 - Version source of truth: root `package.json`, app package versions, `aventics.manifest.json`, `component.json`.
 
 ## Read first
