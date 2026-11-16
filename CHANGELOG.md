@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 — 2026-11-16
+
+- Renamed the product to **Aventics Work Desk** to reflect tasks, timesheets, estimation and team capacity.
+- Added an annual, all-months-default Timesheet view with a year/month filter and positive-effort-only green intensity scale.
+- Added personal Task Tracking row/column/cell highlights, text color, and pins stored per user.
+- Added a separate shared Effort Lookup rate catalog, task-linked estimate items, experience factors and explicit apply-to-task action.
+- Added admin import of private JSON estimation rates, full-workbook import preview/commit with canonical Task ID matching, and inactive engineer provisioning.
+- Added administration controls to activate provisioned accounts and reset passwords.
+- Added data-model documentation, privacy rules and Suite manifest capability updates.
+
+**Data privacy:** User-supplied internal workbook and reference-rate data are not committed to the public source repository.
+
+# Changelog
+
 ## 0.2.1 — 2026-11-16
 
 - Fixed the 32-column Task Tracking table shrinking to the viewport instead of scrolling horizontally.

@@ -1,16 +1,23 @@
 {
-  "name":"aventics-timesheet",
-  "version":"0.2.1",
-  "private":true,
-  "type":"module",
-  "workspaces":["apps/*"],
-  "scripts":{
-    "dev":"concurrently -k \"npm run dev -w @aventics/timesheet-api\" \"npm run dev -w @aventics/timesheet-web\"",
-    "build":"npm run build -w @aventics/timesheet-web && npm run build -w @aventics/timesheet-api",
-    "start":"npm run start -w @aventics/timesheet-api",
-    "typecheck":"npm run typecheck -w @aventics/timesheet-web && npm run typecheck -w @aventics/timesheet-api",
-    "test":"node --experimental-strip-types --test tests/*.test.mts"
+  "name": "aventics-work-desk",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev -w @aventics/timesheet-api\" \"npm run dev -w @aventics/timesheet-web\"",
+    "build": "npm run build -w @aventics/timesheet-web && npm run build -w @aventics/timesheet-api",
+    "start": "npm run start -w @aventics/timesheet-api",
+    "typecheck": "npm run typecheck -w @aventics/timesheet-web && npm run typecheck -w @aventics/timesheet-api",
+    "test": "node --experimental-strip-types --test tests/*.test.mts"
   },
-  "devDependencies":{"concurrently":"^9.2.1","typescript":"^5.9.3"},
-  "engines":{"node":">=22"}
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

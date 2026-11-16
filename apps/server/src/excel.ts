@@ -228,7 +228,7 @@ function title(ws:ExcelJS.Worksheet,headers:string[],frozen=0):void {
 export function safeExcelText(value:string):string {return /^[=+@\-\t\r]/.test(value)?`'${value}`:value;}
 function timesheetHeaders(month:string){const {start,end}=monthBounds(month);return ['Engineer','Status','Task ID','Role',...dateRange(start,end).map(d=>`${d.slice(8,10)}.${d.slice(5,7)}.${d.slice(0,4)}`)];}
 export function templateWorkbook(month:string):ExcelJS.Workbook{
- const wb=new ExcelJS.Workbook();wb.creator='Aventics Suite · Timesheet';
+ const wb=new ExcelJS.Workbook();wb.creator='Aventics Suite · Work Desk';
  const tasks=wb.addWorksheet('Task Tracking'),effort=wb.addWorksheet('Timesheet'),guide=wb.addWorksheet('Instructions');
  title(tasks,TRACKING_COLUMNS.map(c=>c.header),5);title(effort,timesheetHeaders(month),4);
  tasks.addRow([3614,'ip1614','ug','r11','3614-ip1614','3614-ip1788_ug_r11','CAD project for Universal gripper, Series UG, update asm','DuyNK','LuatVV',16,16,8,8,'On hold','Completed',46084,46084,46094,46094,'Clkble','','',0,'Very Difficult',46121,'',49,0,24,24,16,8]);
@@ -236,7 +236,7 @@ export function templateWorkbook(month:string):ExcelJS.Workbook{
  effort.addRow(['DuyNK','Completed','3792-ip1614_series: nl4','EX',...dateRange(monthBounds(month).start,monthBounds(month).end).map(d=>[5,6,9].includes(Number(d.slice(-2)))?Number(d.slice(-2))===6?5:3:null)]);
  tasks.getRow(2).eachCell({includeEmpty:false},c=>{if(c.numFmt==='General'&&typeof c.value==='number')c.numFmt='0.##';});
  guide.addRows([
-  ['AVENTICS TIMESHEET · TEMPLATE'],['Timesheet format','Engineer | Status | Task ID | Role | DD.MM.YYYY date columns for the selected month.'],
+  ['AVENTICS WORK DESK · TEMPLATE'],['Timesheet format','Engineer | Status | Task ID | Role | DD.MM.YYYY date columns for the selected month.'],
   ['Task Tracking','32 columns as requested. Actual EX/QC values are imported as historical baselines.'],
   ['Example rows','DELETE the example rows before importing real effort/tasks. Create matching engineer accounts first.'],
   ['Engineer','Use the login username; e.g. DuyNK is matched case-insensitively to duynk.'],
@@ -252,7 +252,7 @@ export function templateWorkbook(month:string):ExcelJS.Workbook{
  return wb;
 }
 export function makeExport(mode:'tasks'|'effort',tasks:Task[],entries:Array<Entry&{user_id:string}>,breakdown:TaskEffortRow[]=[],month:string):ExcelJS.Workbook{
- const wb=new ExcelJS.Workbook();wb.creator='Aventics Suite · Timesheet';
+ const wb=new ExcelJS.Workbook();wb.creator='Aventics Suite · Work Desk';
  if(mode==='tasks'){
    const ws=wb.addWorksheet('Task Tracking');title(ws,TRACKING_COLUMNS.map(c=>c.header),5);
    const actuals=new Map<string,{ex:number;qc:number}>();

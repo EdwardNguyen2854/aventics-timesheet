@@ -38,7 +38,7 @@ app.addHook('preHandler',async (request)=>{
   if(!user)throw httpError('Please sign in',401);
   (request as RequestWithActor).actor=user;
 });
-app.get('/api/health',async()=>({status:'ok',app:'aventics-timesheet',version:'0.2.0'}));
+app.get('/api/health',async()=>({status:'ok',app:'aventics-work-desk',version:'0.3.0'}));
 app.post('/api/auth/login',async(req,reply)=>{
   if(req.headers['x-requested-with']!=='aventics-timesheet')throw httpError('Invalid request origin',403);
   const input=z.object({username:z.string().min(1).max(64),password:z.string().min(1).max(256)}).parse(req.body);

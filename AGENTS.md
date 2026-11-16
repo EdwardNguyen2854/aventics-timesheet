@@ -1,8 +1,8 @@
-# Aventics Timesheet — Agent Notes
+# Aventics Work Desk — Agent Notes
 
 Suite agent baseline: 2 (2026-11)
 
-- Component: `aventics.timesheet` · `app` · `incubating`
+- Component: `aventics.work-desk` · `app` · `incubating`
 - Version source of truth: root `package.json`, app package versions, `aventics.manifest.json`, `component.json`.
 
 ## Read first
@@ -14,6 +14,12 @@ Suite agent baseline: 2 (2026-11)
 
 ## Product invariants
 
+- **Privacy:** Never commit employee effort entries, task tracking exports, or proprietary estimation rates to the public repository. Import user-supplied source workbooks and rate JSON into configured internal server storage only.
+- **Estimation separation:** Reference EX/QC rate tables and task estimate lines are stored in shared SQLite; they do not change task estimates until an administrator explicitly applies them.
+- **Data relationships:** Task IDs are the canonical join key; imported long task labels are normalized only with a unique serial/project prefix match. Engineer data belongs in separate user databases.
+- **Annotations:** Tracking pin/highlight/text color preferences are scoped to the logged-in user, not team-wide changes.
+
+
 - **Web only**: React frontend served by Node API; never Electron.
 - Store all data on one configured internal server `DATA_ROOT`. The central catalog lives in `shared/`; engineer logs live in `users/{engineerId}/effort.sqlite`.
 - Never open SQLite DBs over SMB from multiple host machines. Only one API process writes databases.
@@ -21,7 +27,7 @@ Suite agent baseline: 2 (2026-11)
 - No undated legacy totals may be fabricated into daily records.
 - Import is preview-first; do not write until explicit confirm.
 - Non-admin users can read/change only their own daily entries; admin All engineers view and grid changes must enforce ownership on server.
-- Keep data, secrets, .env, logs, and workbook archives outside source control.
+- Keep employee data, private estimation references, credentials, .env, logs, and workbook archives outside source control.
 - Preserve Aventics UI Skill: light, square, compact, Bosch logo section and supergraphic, one Bosch blue accent. Admin SVG supergraphic overrides are stored under DATA_ROOT/shared/branding and must reject active content.
 
 ## Suite alignment
