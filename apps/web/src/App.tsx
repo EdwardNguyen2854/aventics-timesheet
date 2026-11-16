@@ -589,6 +589,22 @@ function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:str
  const [id,setId]=useState(''),[name,setName]=useState(''),[password,setPassword]=useState(''),[isAdmin,setIsAdmin]=useState(false),[busy,setBusy]=useState(false),[err,setErr]=useState('');
  const [svg,setSvg]=useState<File|null>(null),[brandBusy,setBrandBusy]=useState(false),[brandError,setBrandError]=useState('');
  const [hasCustom,setHasCustom]=useState(false);
+ const [engineers,setEngineers]=useState<Engineer[]>([]),[credentialUser,setCredentialUser]=useState(''),[newCredential,setNewCredential]=useState('');
+ const reloadEngineers=()=>api<Engineer[]>('/users').then(setEngineers).catch(e=>setErr((e as Error).message));
+ useEffect(()=>{void reloadEngineers();},[]);
+ async function setActive(id:string,active:boolean){
+   if(!window.confirm((active?'Activate':'Deactivate')+' engineer '+id+'?'))return;
+   try{await api('/users/'+encodeURIComponent(id)+'/activate',{method:'POST',body:JSON.stringify({active})});
+     flash('Engineer access updated');void reloadEngineers();refresh();
+   }catch(e){setErr((e as Error).message);}
+ }
+ async function setNewPassword(){
+   if(!credentialUser||newCredential.length<12){setErr('Choose an engineer and enter a password of at least 12 characters');return;}
+   try{await api('/users/'+encodeURIComponent(credentialUser)+'/password',{method:'POST',body:JSON.stringify({password:newCredential})});
+     setNewCredential('');setErr('');flash('Password updated; previous sessions revoked');
+   }catch(e){setErr((e as Error).message);}
+ }
+
  useEffect(()=>{api<{custom:boolean}>('/branding/status').then(r=>setHasCustom(r.custom)).catch(()=>{});},[]);
  async function updateBrand(reset:boolean){setBrandError('');setBrandBusy(true);
   try{
@@ -598,8 +614,16 @@ function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:str
   }catch(error){setBrandError((error as Error).message);}finally{setBrandBusy(false);}
  }
 
- async function save(e:FormEvent){e.preventDefault();setBusy(true);setErr('');try{await api('/users',{method:'POST',body:JSON.stringify({id,name,password,is_admin:isAdmin})});flash(`Engineer ${id} created`);setId('');setName('');setPassword('');setIsAdmin(false);refresh();}catch(e){setErr((e as Error).message);}finally{setBusy(false);}}
+ async function save(e:FormEvent){e.preventDefault();setBusy(true);setErr('');try{await api('/users',{method:'POST',body:JSON.stringify({id,name,password,is_admin:isAdmin})});flash(`Engineer ${id} created`);setId('');setName('');setPassword('');setIsAdmin(false);refresh();void reloadEngineers();}catch(e){setErr((e as Error).message);}finally{setBusy(false);}}
  return <><section className="panel"><div className="panel-header"><h2>Create engineer</h2><span className="subtle">Admin only</span></div><form onSubmit={save} className="panel-body admin-form"><p className="muted">Each engineer receives an isolated server directory and SQLite file. Login credentials are set here.</p><div className="form-row"><label>Username / folder ID<input className="input" placeholder="duynk" pattern="[a-z0-9_-]+" value={id} onChange={e=>setId(e.target.value.toLowerCase())} required/></label><label>Display name<input className="input" placeholder="Engineer name" value={name} onChange={e=>setName(e.target.value)} required/></label></div><div className="form-row"><label>Initial password (12+ characters)<input className="input" type="password" minLength={12} value={password} onChange={e=>setPassword(e.target.value)} required/></label><label className="check-line"><input type="checkbox" checked={isAdmin} onChange={e=>setIsAdmin(e.target.checked)}/>Administrator access</label></div>{err&&<div className="error-msg">{err}</div>}<button className="btn primary" disabled={busy}><Plus size={15}/>Create engineer</button></form></section>
+ <section className="panel"><div className="panel-header"><h2>Engineer access</h2><span className="subtle">Provisioned imports are inactive until you activate them</span></div>
+ <div className="panel-body"><div className="table-scroll"><table><thead><tr><th>Engineer</th><th>State</th><th>Access</th></tr></thead><tbody>
+ {engineers.map(u=><tr key={u.id}><td><strong>{u.name}</strong><div className="mono subtle">{u.id}</div></td><td>{u.active?'Active':'Inactive'}</td><td><button className="btn small" onClick={()=>void setActive(u.id,!u.active)}>{u.active?'Deactivate':'Activate'}</button></td></tr>)}
+ </tbody></table></div><p className="muted">For an imported engineer: set the password, then activate the account.</p>
+ <div className="form-row"><label>Engineer<select className="input" value={credentialUser} onChange={e=>setCredentialUser(e.target.value)}><option value="">Select engineer</option>{engineers.map(u=><option key={u.id} value={u.id}>{u.name} ({u.id})</option>)}</select></label>
+ <label>New password (12+ characters)<input className="input" type="password" autoComplete="new-password" value={newCredential} onChange={e=>setNewCredential(e.target.value)}/></label></div>
+ <button className="btn" onClick={()=>void setNewPassword()}>Set / reset password</button>
+ </div></section>
  <section className="panel"><div className="panel-header"><h2>Supergraphic · custom SVG</h2><span className="subtle">{hasCustom?'Custom asset active':'Suite default active'}</span></div>
  <div className="panel-body"><p>Upload your own supergraphic SVG to replace the top 6 px accent strip across the site. It is stored under the internal server's shared branding folder and survives app updates.</p>
  <div className="brand-upload"><input type="file" className="input file-input" accept=".svg,image/svg+xml" aria-label="Upload supergraphic SVG" onChange={e=>setSvg(e.target.files?.[0]||null)}/>
