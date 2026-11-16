@@ -1,3 +1,6 @@
+export interface EffortRate {id:string;activity:string;difficulty:string;activity_code:string;execution_hours:number;qc_hours:number;criteria:string;updated_at:string}
+export interface WorkEstimate {id:string;task_id:string;rate_id:string;quantity:number;experience:string;factor:number;ex_hours:number;qc_hours:number;created_by:string;created_at:string}
+export interface TrackingMark {user_id:string;scope:'cell'|'row'|'column';task_id:string;column_key:string;fill_color:string;text_color:string;pinned:number}
 export interface Engineer {id:string;name:string;is_admin:number;active:number;created_at:string}
 export interface Task {
  id:string;serial_no:string;ip_no:string;series:string;revision:string;name:string;email_subject:string;
@@ -45,3 +48,5 @@ export function sum(entries:Entry[],fn:(e:Entry)=>boolean=()=>true):number{retur
 export function isoMonth(d:Date):string{return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}
 export function daysOfMonth(month:string):string[]{const [y,m]=month.split('-').map(Number);return Array.from({length:new Date(y!,m!,0).getDate()},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
 export function fmtHours(n:number):string{return Number.isInteger(n)?`${n}`:n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'');}
+
+export function daysOfYear(year:number):string[]{return Array.from({length:(new Date(year+1,0,1).getTime()-new Date(year,0,1).getTime())/86400000},(_,i)=>{const date=new Date(Date.UTC(year,0,i+1));return date.toISOString().slice(0,10);});}

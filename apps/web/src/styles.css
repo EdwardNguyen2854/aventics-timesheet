@@ -90,3 +90,24 @@
  .app-shell.sidebar-collapsed{grid-template-columns:62px minmax(0,1fr)}
  .app-shell:not(.sidebar-collapsed) .sidebar-bottom{display:none}
 }
+
+/* Work Desk estimation — compact and aligned with the Aventics Suite design system. */
+.work-estimation{display:grid;gap:14px}
+.work-flow-note{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid var(--av-line-strong);border-left:3px solid var(--av-blue);padding:12px 14px;font-size:12px;line-height:1.6}
+.lookup-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px}
+.lookup-toolbar .search-wrap{min-width:250px;flex:1}
+.lookup-toolbar input[type=file]{max-width:240px;font-size:11px}
+.lookup-scroll{max-height:420px}
+.lookup-table th:nth-child(6),.lookup-table td:nth-child(6){min-width:300px;max-width:500px;white-space:normal}
+.lookup-table .selected td{background:var(--av-blue-soft)}
+.lookup-new-rate{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:8px;padding:12px;border-top:1px solid var(--av-line)}
+.estimation-controls{display:grid;grid-template-columns:minmax(240px,2fr) minmax(260px,2fr) minmax(100px,0.6fr) minmax(170px,1fr);gap:12px}
+.estimation-controls label{font-size:11px;font-weight:700;display:grid;gap:6px}
+.estimate-result{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:8px;margin:14px 0}
+.estimate-result>div{border:1px solid var(--av-line-strong);background:#fafbfb;padding:12px}
+.estimate-result small{display:block;color:var(--av-muted);font-size:9px}
+.estimate-result strong{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.estimate-apply{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:14px}
+.work-estimation h3{font-size:13px;margin:22px 0 8px}
+@media(max-width:1120px){.estimation-controls{grid-template-columns:repeat(2,minmax(180px,1fr))}.estimate-result{grid-template-columns:repeat(3,minmax(130px,1fr))}}
+@media(max-width:720px){.estimation-controls,.estimate-result,.lookup-new-rate{grid-template-columns:1fr}}

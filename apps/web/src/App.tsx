@@ -1,9 +1,9 @@
 import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent,type ClipboardEvent,type KeyboardEvent,type PointerEvent,type CSSProperties} from 'react';
-import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,Plus,Download,Upload,ChevronLeft,ChevronRight,Search,RefreshCw,X,Trash2,Check,AlertTriangle,LogOut,Database,LockKeyhole,PanelLeftClose,PanelLeftOpen,RotateCcw} from 'lucide-react';
-import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview,TRACKING_COLUMNS} from './api';
+import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,Plus,Download,Upload,ChevronLeft,ChevronRight,Search,RefreshCw,X,Trash2,Check,AlertTriangle,LogOut,Database,LockKeyhole,PanelLeftClose,PanelLeftOpen,RotateCcw,Calculator,Pin,Palette,BookOpen} from 'lucide-react';
+import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview,type EffortRate,type WorkEstimate,type TrackingMark,TRACKING_COLUMNS,daysOfYear} from './api';
 
-type Page='overview'|'timesheet'|'tasks'|'team'|'exchange'|'admin';
-const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
+type Page='overview'|'timesheet'|'tasks'|'estimation'|'team'|'exchange'|'admin';
+const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['estimation','Estimation & Lookup',Calculator],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
 const emptyTask:Omit<Task,'updated_at'>={
  id:'',serial_no:'',ip_no:'',series:'',revision:'',name:'',email_subject:'',engineer:'',qc_engineer:'',
  estimated_ex:0,actual_ex_baseline:0,estimated_qc:0,actual_qc_baseline:0,rework_effort:'',status:'Not started',
@@ -20,7 +20,7 @@ function Login({onDone}:{onDone:(u:Engineer)=>void}){
  const [username,setUsername]=useState('admin'),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  async function submit(ev:FormEvent){ev.preventDefault();setBusy(true);setError('');try{const data=await api<{user:Engineer}>('/auth/login',{method:'POST',body:JSON.stringify({username,password})});onDone(data.user);}catch(e){setError(String((e as Error).message));}finally{setBusy(false);}}
  return <div className="login-shell"><Supergraphic/><form className="login-card" onSubmit={submit}>
- <div className="brand login-brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Timesheet</strong></div></div>
+ <div className="brand login-brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Work Desk</strong></div></div>
  <h1>Sign in</h1><p className="muted">Team effort tracking · Internal network</p>
  <label>Username<input className="input" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} required/></label>
  <label>Password<input className="input" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>
@@ -444,6 +444,79 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
  {editing&&<TaskEditor initial={editing} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);onRefresh();flash('Task saved');}}/>}
  </>;
 }
+
+function EstimationPage({overview,flash,onRefresh}:{overview:Overview;flash:(message:string)=>void;onRefresh:()=>void}){
+ const [rates,setRates]=useState<EffortRate[]>([]),[estimates,setEstimates]=useState<WorkEstimate[]>([]);
+ const [activity,setActivity]=useState(''),[rateId,setRateId]=useState(''),[experience,setExperience]=useState('Intermediate');
+ const [quantity,setQuantity]=useState(1),[taskId,setTaskId]=useState(''),[search,setSearch]=useState('');
+ const [loading,setLoading]=useState(false),[error,setError]=useState('');
+ const [selectedFile,setSelectedFile]=useState<File|null>(null),[showAdd,setShowAdd]=useState(false);
+ const [draftRate,setDraftRate]=useState({id:'',activity:'',difficulty:'',activity_code:'',execution_hours:0,qc_hours:0,criteria:''});
+ const admin=overview.role==='admin';
+ async function reload(){setLoading(true);try{
+   const [lookup,saved]=await Promise.all([
+     api<{rates:EffortRate[];factors:Record<string,number>}>('/effort-lookup'),api<WorkEstimate[]>('/task-estimates')]);
+   setRates(lookup.rates);setEstimates(saved);setError('');
+ }catch(e){setError((e as Error).message);}finally{setLoading(false);}}
+ useEffect(()=>{void reload();},[]);
+ const activities=[...new Set(rates.map(r=>r.activity))];
+ const visible=rates.filter(r=>(!activity||r.activity===activity)&&(r.activity+' '+r.difficulty+' '+r.activity_code+' '+r.criteria).toLowerCase().includes(search.toLowerCase()));
+ const rate=rates.find(r=>r.id===rateId)||visible[0];
+ const factor=experience==='Beginner'?1:experience==='Expert'?0.8:0.9;
+ const ex=rate?Math.round(rate.execution_hours*quantity*factor*10)/10:0;
+ const qc=rate?Math.round(rate.qc_hours*quantity*factor*10)/10:0;
+ const taskItems=estimates.filter(x=>x.task_id===taskId);
+ const taskTotals={ex:taskItems.reduce((n,x)=>n+x.ex_hours,0),qc:taskItems.reduce((n,x)=>n+x.qc_hours,0)};
+ async function saveEstimate(){if(!rate||!taskId)return;setLoading(true);try{
+   await api('/task-estimates',{method:'POST',body:JSON.stringify({task_id:taskId,rate_id:rate.id,quantity,experience})});
+   flash('Estimation item saved');await reload();
+ }catch(e){setError((e as Error).message);}finally{setLoading(false);}}
+ async function applyEstimate(){if(!taskId||!taskItems.length)return;
+   if(!window.confirm('Replace Task Tracking EX/QC estimates for '+taskId+' with '+fmtHours(taskTotals.ex)+' h EX and '+fmtHours(taskTotals.qc)+' h QC?'))return;
+   try{await api('/task-estimates/apply',{method:'POST',body:JSON.stringify({task_id:taskId})});flash('Task Tracking estimates updated');onRefresh();}
+   catch(e){setError((e as Error).message);}}
+ async function removeEstimate(id:string){if(!window.confirm('Delete this estimate item?'))return;
+   try{await api('/task-estimates/'+encodeURIComponent(id),{method:'DELETE'});flash('Estimate removed');await reload();}
+   catch(e){setError((e as Error).message);}}
+ async function importRates(){if(!selectedFile)return;setLoading(true);try{
+   const response=await upload<{imported:number}>('/effort-lookup/import',selectedFile);
+   flash(response.imported+' reference rates imported');setSelectedFile(null);await reload();
+ }catch(e){setError((e as Error).message);}finally{setLoading(false);}}
+ async function saveRate(){setLoading(true);try{
+   await api('/effort-lookup',{method:'POST',body:JSON.stringify(draftRate)});
+   setShowAdd(false);flash('Reference rate saved');await reload();
+ }catch(e){setError((e as Error).message);}finally{setLoading(false);}}
+ return <div className="work-estimation">
+ <div className="work-flow-note"><BookOpen size={16}/><span><strong>Task → estimation item → reference rate.</strong> A saved estimate uses a rate, quantity and engineer experience. Actual effort always comes from dated timesheet entries. Only Apply to Task Tracking changes the task's planned estimate.</span></div>
+ {error&&<div className="error-msg" role="alert">{error}</div>}
+ <section className="panel"><div className="panel-header"><h2>Effort lookup</h2><span className="subtle">{rates.length} reference activities · EX / QC hours</span></div>
+ <div className="lookup-toolbar">
+ <div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search category, difficulty, code or criteria"/></div>
+ <select className="input short" aria-label="Activity filter" value={activity} onChange={e=>{setActivity(e.target.value);setRateId('');}}><option value="">All activities</option>{activities.map(a=><option key={a}>{a}</option>)}</select>
+ {admin&&<><input type="file" accept=".json,application/json" aria-label="Private estimation reference JSON" onChange={e=>setSelectedFile(e.target.files?.[0]||null)}/><button className="btn small" disabled={!selectedFile||loading} onClick={()=>void importRates()}><Upload size={14}/>Import reference</button><button className="btn small" onClick={()=>setShowAdd(v=>!v)}><Plus size={14}/>Add rate</button></>}
+ </div>
+ {showAdd&&admin&&<div className="lookup-new-rate"><input className="input" placeholder="Identifier" value={draftRate.id} onChange={e=>setDraftRate(v=>({...v,id:e.target.value}))}/><input className="input" placeholder="Activity" value={draftRate.activity} onChange={e=>setDraftRate(v=>({...v,activity:e.target.value}))}/><input className="input" placeholder="Difficulty" value={draftRate.difficulty} onChange={e=>setDraftRate(v=>({...v,difficulty:e.target.value}))}/><input className="input" placeholder="Code" value={draftRate.activity_code} onChange={e=>setDraftRate(v=>({...v,activity_code:e.target.value}))}/><input className="input" type="number" min="0" step=".1" aria-label="EX hours" value={draftRate.execution_hours} onChange={e=>setDraftRate(v=>({...v,execution_hours:Number(e.target.value)}))}/><input className="input" type="number" min="0" step=".1" aria-label="QC hours" value={draftRate.qc_hours} onChange={e=>setDraftRate(v=>({...v,qc_hours:Number(e.target.value)}))}/><input className="input" placeholder="Criteria" value={draftRate.criteria} onChange={e=>setDraftRate(v=>({...v,criteria:e.target.value}))}/><button className="btn primary" onClick={()=>void saveRate()}>Save rate</button></div>}
+ <div className="table-scroll lookup-scroll"><table className="lookup-table"><thead><tr><th>Activity</th><th>Difficulty</th><th>Activity code</th><th>EX · h</th><th>QC · h</th><th>Criteria</th><th/></tr></thead><tbody>
+ {visible.map(r=><tr key={r.id} className={rate?.id===r.id?'selected':''}><td>{r.activity}</td><td>{r.difficulty}</td><td className="mono">{r.activity_code}</td><td className="num">{fmtHours(r.execution_hours)}</td><td className="num">{fmtHours(r.qc_hours)}</td><td title={r.criteria}>{r.criteria}</td><td><button className="btn small" onClick={()=>setRateId(r.id)}>Use</button></td></tr>)}
+ {!visible.length&&<tr><td colSpan={7} className="empty">No reference data. Admins can import the private estimation lookup JSON.</td></tr>}
+ </tbody></table></div></section>
+ <section className="panel"><div className="panel-header"><h2>Task estimation</h2><span className="subtle">Formula: reference hours × quantity × experience factor</span></div>
+ <div className="panel-body">
+ <div className="estimation-controls">
+ <label>Task ID<select className="input" value={taskId} onChange={e=>setTaskId(e.target.value)}><option value="">Select task to save estimate</option>{overview.tasks.map(t=><option key={t.id} value={t.id}>{t.id} · {t.name}</option>)}</select></label>
+ <label>Reference rate<select className="input" value={rate?.id||''} onChange={e=>setRateId(e.target.value)}>{visible.map(r=><option key={r.id} value={r.id}>{r.activity} · {r.difficulty} · {r.activity_code}</option>)}</select></label>
+ <label>Quantity<input className="input" type="number" min="1" max="100000" step="1" value={quantity} onChange={e=>setQuantity(Math.max(1,Math.floor(Number(e.target.value)||1)))}/></label>
+ <label>Experience<select className="input" value={experience} onChange={e=>setExperience(e.target.value)}><option value="Beginner">Beginner · 1.00</option><option value="Intermediate">Intermediate · 0.90</option><option value="Expert">Expert · 0.80</option></select></label>
+ </div>
+ <div className="estimate-result"><div><small>REFERENCE EX</small><strong>{fmtHours(rate?.execution_hours||0)}h</strong></div><div><small>REFERENCE QC</small><strong>{fmtHours(rate?.qc_hours||0)}h</strong></div><div><small>ESTIMATED EX</small><strong>{fmtHours(ex)}h</strong></div><div><small>ESTIMATED QC</small><strong>{fmtHours(qc)}h</strong></div><div><small>EST. TOTAL</small><strong>{fmtHours(ex+qc)}h</strong></div></div>
+ <div className="button-line"><button className="btn primary" disabled={!admin||!rate||!taskId||loading} onClick={()=>void saveEstimate()}><Plus size={14}/>Save line to task</button>{!admin&&<span className="subtle">Preview only. Admins save and apply estimates.</span>}</div>
+ {taskId&&<><h3>Saved estimation lines · {taskId}</h3><div className="table-scroll"><table><thead><tr><th>Rate</th><th>Quantity</th><th>Experience</th><th>Factor</th><th>EX hours</th><th>QC hours</th><th/></tr></thead><tbody>
+ {taskItems.map(x=><tr key={x.id}><td>{rates.find(r=>r.id===x.rate_id)?.activity_code||x.rate_id}</td><td className="num">{x.quantity}</td><td>{x.experience}</td><td>{x.factor}</td><td className="num">{fmtHours(x.ex_hours)}</td><td className="num">{fmtHours(x.qc_hours)}</td><td>{admin&&<button className="icon-btn" aria-label="Delete estimate" onClick={()=>void removeEstimate(x.id)}><Trash2 size={14}/></button>}</td></tr>)}
+ {!taskItems.length&&<tr><td colSpan={7} className="empty">No saved estimates for this task.</td></tr>}</tbody></table></div>
+ <div className="estimate-apply"><span>Calculated task total · <strong>{fmtHours(taskTotals.ex)}h EX</strong> + <strong>{fmtHours(taskTotals.qc)}h QC</strong></span><button className="btn" disabled={!admin||!taskItems.length} onClick={()=>void applyEstimate()}>Apply to Task Tracking</button></div></>}
+ </div></section></div>;
+}
+
 function TeamPage({overview,month}:{overview:Overview;month:string}){
  const days=daysOfMonth(month),byUser=overview.users.map(u=>({user:u,entries:overview.entries.filter(e=>e.user_id===u.id)}));
  return <><div className="note-line"><AlertTriangle size={15}/> The 8 h/day target is a planning reference, not a restriction. Weekends are shaded.</div>
@@ -494,20 +567,21 @@ export default function App(){
  useEffect(()=>{if(!currentUser)return;const id=window.setInterval(()=>{if(document.visibilityState==='visible')void refresh();},60000);return ()=>window.clearInterval(id);},[currentUser,refresh]);
  async function logout(){await api('/auth/logout',{method:'POST'}).catch(()=>{});setCurrentUser(null);setOverview(null);}
  function moveMonth(delta:number){const [y,m]=month.split('-').map(Number);setMonth(isoMonth(new Date(y!,m!-1+delta,1)));}
- if(checking)return <div className="loader">Loading Aventics Timesheet…</div>;
+ if(checking)return <div className="loader">Loading Aventics Work Desk…</div>;
  if(!currentUser)return <Login onDone={u=>{setCurrentUser(u);setSelectedUser(u.id);}}/>;
  const selected=overview?.users.find(u=>u.id===selectedUser);
  const pages=NAV.filter(([key])=>key!=='admin'||!!currentUser.is_admin);
- const meta:Record<Page,[string,string]>={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task Tracking','32-column project task tracking with estimated and actual effort'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
+ const meta:Record<Page,[string,string]>={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task Tracking','32-column project task tracking with estimated and actual effort'],estimation:['Estimation & Lookup','Reference rates, experience factors, and task estimation'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
  return <div className={`app-shell ${sidebarCollapsed?'sidebar-collapsed':''}`}><Supergraphic revision={brandRevision}/>
- <header className="topbar"><div className="brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Timesheet</strong></div></div><div className="header-context"><span className="header-label">ENGINEERING OPERATIONS</span><span className="header-divider"/><span className={error?"offline-dot":"online-dot"}/><span>{error?"Connection problem":"Internal server"}</span></div><div className="account"><div className="user-circle">{currentUser.name.slice(0,2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><small>{currentUser.is_admin?'Administrator':'Engineer'}</small></div><button className="icon-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div></header>
- <aside className="sidebar" aria-label="Workspace navigation"><div className="sidebar-heading"><div className="sidebar-label">WORKSPACE</div><button type="button" className="sidebar-toggle" onClick={()=>setSidebarCollapsed(v=>!v)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}</button></div><nav aria-label="Workspace pages">{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} title={sidebarCollapsed?label:undefined} aria-label={label} aria-current={page===key?'page':undefined} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS TIMESHEET</span><small>v0.2.1 · Web</small></div></aside>
+ <header className="topbar"><div className="brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Work Desk</strong></div></div><div className="header-context"><span className={error?"offline-dot":"online-dot"}/><span>{error?"Connection problem":"Connected"}</span></div><div className="account"><div className="user-circle">{currentUser.name.slice(0,2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><small>{currentUser.is_admin?'Administrator':'Engineer'}</small></div><button className="icon-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div></header>
+ <aside className="sidebar" aria-label="Workspace navigation"><div className="sidebar-heading"><div className="sidebar-label">WORKSPACE</div><button type="button" className="sidebar-toggle" onClick={()=>setSidebarCollapsed(v=>!v)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}</button></div><nav aria-label="Workspace pages">{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} title={sidebarCollapsed?label:undefined} aria-label={label} aria-current={page===key?'page':undefined} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS WORK DESK</span><small>v0.3.0 · Web</small></div></aside>
  <main className="main"><div className="page-header"><div><div className="crumb">WORKSPACE <ChevronRight size={12}/> {meta[page][0].toUpperCase()}</div><h1>{meta[page][0]}</h1><p>{meta[page][1]}</p></div><div className="page-actions"><div className="month-picker"><button aria-label="Previous month" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button><input type="month" value={month} onChange={e=>setMonth(e.target.value)}/><button aria-label="Next month" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button></div><button className="btn small" onClick={()=>void refresh()} title="Refresh"><RefreshCw size={14}/>{loading?'Loading…':'Refresh'}</button></div></div>
  {notice&&<Notice message={notice} onClose={()=>setNotice('')}/>} {error&&<div className="error-msg">{error}</div>}
  {!overview?<div className="empty large">{loading?'Loading team data…':'No data available.'}</div>:<>
  {page==='overview'&&<OverviewPage overview={overview} month={month} onGo={setPage}/>}
  {page==='timesheet'&&<TimesheetPage overview={overview} selectedUser={selectedUser} onUser={setSelectedUser} month={month} refresh={()=>void refresh()} flash={flash}/>}
  {page==='tasks'&&<TasksPage overview={overview} onRefresh={()=>void refresh()} flash={flash} month={month}/>}
+  {page==='estimation'&&<EstimationPage overview={overview} onRefresh={()=>void refresh()} flash={flash}/>}
  {page==='team'&&<TeamPage overview={overview} month={month}/>}
  {page==='exchange'&&<ExchangePage isAdmin={!!currentUser.is_admin} refresh={()=>void refresh()} flash={flash} month={month} selectedUser={selectedUser}/>}
  {page==='admin'&&!!currentUser.is_admin&&<AdminPage refresh={()=>void refresh()} flash={flash} onBrandChanged={()=>setBrandRevision(x=>x+1)}/>}
