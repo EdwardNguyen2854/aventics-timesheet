@@ -140,3 +140,30 @@
 .mark-dialog .panel-body{display:grid;gap:14px}
 .mark-dialog label:not(.check-line){display:grid;gap:5px;font-size:11px;font-weight:650}
 .mark-dialog .check-line{display:flex;align-items:center;gap:8px}
+
+/* WorkTrack v0.4 — task workspace and variance dashboard */
+.wt-backdrop{position:fixed;inset:0;z-index:100;background:rgba(18,28,34,.4);display:flex;justify-content:flex-end}
+.wt-task-drawer{height:100%;width:min(680px,100vw);background:#fff;display:flex;flex-direction:column;box-shadow:-8px 0 30px rgba(0,0,0,.15)}
+.wt-drawer-head{padding:20px 22px 16px;border-bottom:1px solid var(--av-line);display:flex;justify-content:space-between;gap:12px;background:#fafbfc}
+.wt-drawer-head small{font-size:9px;color:var(--av-blue);letter-spacing:.13em;font-weight:750}
+.wt-drawer-head h2{font-size:19px;margin:5px 0}.wt-drawer-head p{font-size:11px;margin:0;color:var(--av-muted)}
+.wt-actions{display:flex;gap:8px}.wt-tabs{display:flex;gap:0;border-bottom:1px solid var(--av-line-strong)}
+.wt-tabs button{display:flex;gap:6px;align-items:center;background:transparent;border:0;border-bottom:2px solid transparent;padding:13px 15px;font-size:11px}
+.wt-tabs button.active{border-bottom-color:var(--av-blue);color:var(--av-blue-deep);font-weight:750}
+.wt-drawer-body{overflow:auto;flex:1;padding:20px 22px}.wt-drawer-body h3{font-size:12px;margin:22px 0 10px}
+.wt-detail-list{display:grid;gap:0;border-top:1px solid var(--av-line)}
+.wt-detail-list>div{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid var(--av-line);font-size:11px}
+.wt-detail-list span{color:var(--av-muted);max-width:50%}.wt-detail-list strong{text-align:right;overflow-wrap:anywhere}
+.wt-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.wt-kpi-grid>div{border:1px solid var(--av-line);background:#f8fafb;padding:12px 14px}
+.wt-kpi-grid small{display:block;color:var(--av-muted);font-size:9px;font-weight:650;margin-bottom:8px}
+.wt-kpi-grid strong{font-size:18px;font-variant-numeric:tabular-nums}
+.wt-metric-summary{font-size:11px;padding:12px;background:#eaf5f9;border-left:3px solid var(--av-blue)}
+.wt-analytics{display:grid;gap:14px}.wt-analytics-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
+.wt-variance-row{display:grid;grid-template-columns:170px minmax(140px,1fr) 76px;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #eff1f2}
+.wt-variance-label{display:grid;gap:2px}.wt-variance-label strong{font-size:10px}.wt-variance-label small{font-size:9px;color:var(--av-muted)}
+.wt-variance-track{position:relative;height:25px;background:#f5f7f8}
+.wt-estimate-bar,.wt-actual-bar{position:absolute;left:0;height:8px;max-width:100%;background:#89a4b4}.wt-estimate-bar{top:3px}.wt-actual-bar{top:14px;background:#28a75b}
+.wt-actual-bar.overrun{background:#ca695d}.wt-variance-number{text-align:right;font-size:10px}
+@media(max-width:920px){.wt-analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.wt-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.wt-tabs button{padding:11px 6px;font-size:10px}.wt-variance-row{grid-template-columns:110px minmax(80px,1fr) 65px}}

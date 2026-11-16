@@ -1,9 +1,11 @@
 import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent,type ClipboardEvent,type KeyboardEvent,type PointerEvent,type CSSProperties} from 'react';
 import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,Plus,Download,Upload,ChevronLeft,ChevronRight,Search,RefreshCw,X,Trash2,Check,AlertTriangle,LogOut,Database,LockKeyhole,PanelLeftClose,PanelLeftOpen,RotateCcw,Calculator,Pin,Palette,BookOpen} from 'lucide-react';
 import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview,type EffortRate,type WorkEstimate,type TrackingMark,TRACKING_COLUMNS,daysOfYear} from './api';
+import {TaskWorkspace} from './TaskWorkspace';
+import {PerformancePage} from './PerformancePage';
 
-type Page='overview'|'timesheet'|'tasks'|'estimation'|'team'|'exchange'|'admin';
-const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['estimation','Estimation & Lookup',Calculator],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
+type Page='overview'|'timesheet'|'tasks'|'estimation'|'performance'|'team'|'exchange'|'admin';
+const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['estimation','Estimation & Lookup',Calculator],['performance','Performance Analytics',LayoutDashboard],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
 const emptyTask:Omit<Task,'updated_at'>={
  id:'',serial_no:'',ip_no:'',series:'',revision:'',name:'',email_subject:'',engineer:'',qc_engineer:'',
  estimated_ex:0,actual_ex_baseline:0,estimated_qc:0,actual_qc_baseline:0,rework_effort:'',status:'Not started',
@@ -331,7 +333,7 @@ function readStoredWidths():Record<string,number>{
    ));
  }catch{return {};}
 }
-function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh:()=>void;flash:(s:string)=>void;month:string}){
+function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overview;onRefresh:()=>void;flash:(s:string)=>void;month:string;onOpenTask:(id:string)=>void}){
  const [search,setSearch]=useState(''),[status,setStatus]=useState('All');
  const [editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null),[editMode,setEditMode]=useState(false);
  const [active,setActive]=useState<{taskId:string;column:number;draft:string}|null>(null),[err,setErr]=useState('');
@@ -478,7 +480,7 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
      :editable?<button className="tracking-cell" title={`${column.header}: click to edit`} onClick={()=>setActive({taskId:t.id,column:i,draft:display(t,i)})}>{mark?.pinned&&<Pin size={11}/>} {column.key==='status'?<Status value={t.status}/>:display(t,i)||'·'}</button>
      :column.key==='status'?<Status value={t.status}/>:<>{mark?.pinned&&<Pin size={11}/>} {display(t,i)||'·'}</>}
    </td>;
- })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Details</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
+ })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>onOpenTask(t.id)}>Open</button><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Edit</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
  {!filtered.length&&<tr><td colSpan={TRACKING_COLUMNS.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
  </tbody></table></div></section>
  {markEditor&&<div className="modal-backdrop" onClick={()=>setMarkEditor(null)}><section className="modal mark-dialog" role="dialog" aria-modal="true" aria-label="Mark Task Tracking area" onClick={e=>e.stopPropagation()}>
@@ -634,6 +636,7 @@ function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:str
 }
 export default function App(){
  const [brandRevision,setBrandRevision]=useState(0);
+ const [openTaskId,setOpenTaskId]=useState<string|null>(null);
  const [sidebarCollapsed,setSidebarCollapsed]=useState(()=>{try{return localStorage.getItem(SIDEBAR_COLLAPSED_KEY)==='1';}catch{return false;}});
  useEffect(()=>{try{localStorage.setItem(SIDEBAR_COLLAPSED_KEY,sidebarCollapsed?'1':'0');}catch{}},[sidebarCollapsed]);
  const [currentUser,setCurrentUser]=useState<Engineer|null>(null),[checking,setChecking]=useState(true),[page,setPage]=useState<Page>('overview'),[month,setMonth]=useState(isoMonth(new Date())),[selectedUser,setSelectedUser]=useState(''),[overview,setOverview]=useState<Overview|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -648,7 +651,7 @@ export default function App(){
  if(!currentUser)return <Login onDone={u=>{setCurrentUser(u);setSelectedUser(u.id);}}/>;
  const selected=overview?.users.find(u=>u.id===selectedUser);
  const pages=NAV.filter(([key])=>key!=='admin'||!!currentUser.is_admin);
- const meta:Record<Page,[string,string]>={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task Tracking','32-column project task tracking with estimated and actual effort'],estimation:['Estimation & Lookup','Reference rates, experience factors, and task estimation'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
+ const meta:Record<Page,[string,string]>={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task Tracking','32-column project task tracking with estimated and actual effort'],performance:['Performance Analytics','Estimated vs actual effort and project overruns'],estimation:['Estimation & Lookup','Reference rates, experience factors, and task estimation'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
  return <div className={`app-shell ${sidebarCollapsed?'sidebar-collapsed':''}`}><Supergraphic revision={brandRevision}/>
  <header className="topbar"><div className="brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">WorkTrack</strong></div></div><div className="header-context"><span className={error?"offline-dot":"online-dot"}/><span>{error?"Connection problem":"Connected"}</span></div><div className="account"><div className="user-circle">{currentUser.name.slice(0,2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><small>{currentUser.is_admin?'Administrator':'Engineer'}</small></div><button className="icon-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div></header>
  <aside className="sidebar" aria-label="Workspace navigation"><div className="sidebar-heading"><div className="sidebar-label">WORKSPACE</div><button type="button" className="sidebar-toggle" onClick={()=>setSidebarCollapsed(v=>!v)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}</button></div><nav aria-label="Workspace pages">{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} title={sidebarCollapsed?label:undefined} aria-label={label} aria-current={page===key?'page':undefined} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS WORKTRACK</span><small>v0.4.0 · Web</small></div></aside>
@@ -657,11 +660,12 @@ export default function App(){
  {!overview?<div className="empty large">{loading?'Loading team data…':'No data available.'}</div>:<>
  {page==='overview'&&<OverviewPage overview={overview} month={month} onGo={setPage}/>}
  {page==='timesheet'&&<TimesheetPage overview={overview} selectedUser={selectedUser} onUser={setSelectedUser} refresh={()=>void refresh()} flash={flash}/>}
- {page==='tasks'&&<TasksPage overview={overview} onRefresh={()=>void refresh()} flash={flash} month={month}/>}
+ {page==='tasks'&&<TasksPage overview={overview} onRefresh={()=>void refresh()} flash={flash} month={month} onOpenTask={setOpenTaskId}/>}
+  {page==='performance'&&<PerformancePage revision={overview.entries.length+overview.tasks.length}/>}
   {page==='estimation'&&<EstimationPage overview={overview} onRefresh={()=>void refresh()} flash={flash}/>}
  {page==='team'&&<TeamPage overview={overview} month={month}/>}
  {page==='exchange'&&<ExchangePage isAdmin={!!currentUser.is_admin} refresh={()=>void refresh()} flash={flash} month={month} selectedUser={selectedUser}/>}
  {page==='admin'&&!!currentUser.is_admin&&<AdminPage refresh={()=>void refresh()} flash={flash} onBrandChanged={()=>setBrandRevision(x=>x+1)}/>}
- </>}</main><footer className="statusbar"><span><span className={error?"offline-dot":"online-dot"}/>{error?"API error":"Connected to internal API"}</span><span>{overview?.users.length??0} engineers · {overview?.tasks.length??0} registered tasks</span><span><LockKeyhole size={12}/> Local SQLite storage</span></footer>
+ </>}{openTaskId&&<TaskWorkspace taskId={openTaskId} onClose={()=>setOpenTaskId(null)}/>}</main><footer className="statusbar"><span><span className={error?"offline-dot":"online-dot"}/>{error?"API error":"Connected to internal API"}</span><span>{overview?.users.length??0} engineers · {overview?.tasks.length??0} registered tasks</span><span><LockKeyhole size={12}/> Local SQLite storage</span></footer>
  </div>;
 }
