@@ -49,4 +49,4 @@ export function isoMonth(d:Date):string{return `${d.getFullYear()}-${String(d.ge
 export function daysOfMonth(month:string):string[]{const [y,m]=month.split('-').map(Number);return Array.from({length:new Date(y!,m!,0).getDate()},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`);}
 export function fmtHours(n:number):string{return Number.isInteger(n)?`${n}`:n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'');}
 
-export function daysOfYear(year:number):string[]{return Array.from({length:(new Date(year+1,0,1).getTime()-new Date(year,0,1).getTime())/86400000},(_,i)=>{const date=new Date(Date.UTC(year,0,i+1));return date.toISOString().slice(0,10);});}
+export function daysOfYear(year:number):string[]{return Array.from({length:(Date.UTC(year+1,0,1)-Date.UTC(year,0,1))/86400000},(_,i)=>{const date=new Date(Date.UTC(year,0,i+1));return date.toISOString().slice(0,10);});}

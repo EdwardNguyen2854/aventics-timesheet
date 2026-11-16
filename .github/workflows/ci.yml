@@ -22,3 +22,5 @@ jobs:
         run: npm run typecheck
       - name: Production build
         run: npm run build
+      - name: Excel and SQLite integration test
+        run: node --test tests/integration.test.mjs
