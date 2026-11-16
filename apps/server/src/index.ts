@@ -9,10 +9,12 @@ import {z,ZodError} from 'zod';
 import {ENTRY_KINDS,ROLES,TASK_STATUSES,monthBounds,validHours,validIsoDate} from './domain.js';
 import {bootstrap,central,createUser,newSession,hashToken,userForSession,listTasks,listUsers,listEntries,allEntries,userDb,aggregateTaskActuals,taskEffortBreakdown,upsertTask,addEntry,removeEntry,replaceEffortCell,verifyPassword,DATA_ROOT,type User,type Task} from './db.js';
 import {templateWorkbook,parseWorkbook,makeExport} from './excel.js';
+import {initializeWorktrack,migrateEngineer,auditEntry,writeTaskWithAudit,getAudit,taskDetail,varianceReport,listAliases,setAlias,savedViews,setSavedView,beginImport,updateImport,listImports,backupAll,listBackups} from './worktrack.js';
 import {EXPERIENCE_FACTORS,listEffortRates,listTaskEstimates,addTaskEstimate,listTrackingMarks} from './db.js';
 
 
 bootstrap();
+initializeWorktrack();
 const app=Fastify({logger:true,bodyLimit:2_000_000,trustProxy:false});
 await app.register(cookie);
 await app.register(multipart,{limits:{fileSize:10*1024*1024,files:1,fields:4}});
@@ -74,6 +76,38 @@ app.post('/api/users/:id/password',async(req)=>{
   if(!change.changes)throw httpError('Engineer not found',404);return {ok:true};
 });
 app.get('/api/tasks',async()=>listTasks());
+app.get('/api/tasks/:id/detail',async(req)=>{
+ const {id}=req.params as {id:string};const detail=taskDetail(id,actor(req).id,!!actor(req).is_admin);
+ if(!detail)throw httpError('Task not found',404);return detail;
+});
+app.get('/api/tasks/:id/history',async(req)=>{
+ const {id}=req.params as {id:string};
+ if(!actor(req).is_admin)throw httpError('Admin access required',403);
+ return central.prepare("SELECT * FROM task_audit_events WHERE entity_type='task' AND entity_id=? ORDER BY created_at DESC LIMIT 100").all(id);
+});
+app.get('/api/reports/variance',async(req)=>{
+ const filter=z.object({project:z.string().optional(),engineer:z.string().optional(),status:z.string().optional()}).parse(req.query);
+ return varianceReport(actor(req).id,!!actor(req).is_admin).filter(r=>(!filter.project||r.project_id===filter.project)&&(!filter.engineer||r.engineer===filter.engineer)&&(!filter.status||r.status===filter.status));
+});
+app.get('/api/task-aliases',async()=>listAliases());
+app.post('/api/task-aliases',async(req)=>{
+ guardAdmin(req);const {alias,task_id}=z.object({alias:z.string().min(1).max(200),task_id:z.string().min(1).max(200)}).parse(req.body);
+ setAlias(alias,task_id,actor(req).id);return {ok:true};
+});
+app.get('/api/views',async(req)=>savedViews(actor(req).id).map(v=>({id:v.view_id,config:JSON.parse(v.config_json),updated_at:v.updated_at})));
+app.put('/api/views/:id',async(req)=>{
+ const id=(req.params as {id:string}).id;
+ if(!/^[a-z0-9_-]{1,40}$/.test(id))throw httpError('Invalid view ID');
+ const {config}=z.object({config:z.record(z.string(),z.unknown())}).parse(req.body);
+ setSavedView(actor(req).id,id,config);return {ok:true};
+});
+app.get('/api/audit',async(req)=>{const {taskId}=z.object({taskId:z.string().optional()}).parse(req.query);
+ return getAudit(actor(req).id,!!actor(req).is_admin,taskId);
+});
+app.get('/api/admin/imports',async(req)=>{guardAdmin(req);return listImports();});
+app.get('/api/admin/backups',async(req)=>{guardAdmin(req);return listBackups();});
+app.post('/api/admin/backups',async(req)=>{guardAdmin(req);const result=await backupAll();return result;});
+
 const taskSchema=z.object({
  id:z.string().trim().min(1).max(200),
  serial_no:z.string().max(300).default(''),ip_no:z.string().max(300).default(''),
@@ -96,9 +130,10 @@ function validateTaskDates(input:z.infer<typeof taskSchema>) {
  for(const key of TASK_DATE_KEYS)if(input[key]&&!validIsoDate(input[key]))throw httpError(`${key}: use YYYY-MM-DD`);
 }
 app.post('/api/tasks',async(req)=>{
-  guardAdmin(req);const input=taskSchema.parse(req.body);
+  guardAdmin(req);const input=taskSchema.extend({expected_updated_at:z.string().optional()}).parse(req.body);
   validateTaskDates(input);
-  upsertTask(input);return {ok:true};
+  const {expected_updated_at,...task}=input;
+  writeTaskWithAudit(task,actor(req).id,expected_updated_at);return {ok:true};
 });
 app.post('/api/tasks/bulk',async(req)=>{
  guardAdmin(req);
@@ -106,7 +141,7 @@ app.post('/api/tasks/bulk',async(req)=>{
  const seen=new Set<string>();for(const task of tasks){
    if(seen.has(task.id))throw httpError('Repeated Task ID in paste');seen.add(task.id);validateTaskDates(task);
  }
- central.transaction(()=>{for(const task of tasks)upsertTask(task);})();
+ central.transaction(()=>{for(const task of tasks)writeTaskWithAudit(task,actor(req).id);})();
  return {ok:true,updated:tasks.length};
 });
 app.get('/api/overview',async(req)=>{
@@ -217,7 +252,9 @@ function checkEntry(input:z.infer<typeof entrySchema>):void {
 }
 app.post('/api/entries',async(req)=>{
   const input=entrySchema.parse(req.body);canReadUser(req,input.user_id);checkEntry(input);
-  const {user_id,...data}=input;return addEntry(user_id,data);
+  const {user_id,...data}=input;const db=userDb(user_id);migrateEngineer(user_id);
+  return db.transaction(()=>{const previous=db.prepare('SELECT * FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note=?').get(data.date,data.task_id,data.kind,data.role,data.note);
+    const saved=addEntry(user_id,data);auditEntry(user_id,actor(req).id,saved.id,previous?'update':'create',previous,saved);return saved;})();
 });
 // Spreadsheet-style cell updates; owner/admin authorization and conflict checks on server.
 const cellSchema=z.object({user_id:z.string(),date:z.string(),task_id:z.string().default(''),kind:z.enum(ENTRY_KINDS),role:z.enum(ROLES),hours:z.number().finite().min(0).max(24)});
@@ -237,12 +274,22 @@ app.post('/api/effort-cells',async(req)=>{
    const {n}=db.prepare('SELECT COUNT(*) n FROM entries WHERE date=? AND task_id=? AND kind=? AND role=?').get(cell.date,cell.task_id,cell.kind,cell.role) as {n:number};
    if(n>1)throw httpError(`Cell ${cell.date} / ${cell.task_id||cell.kind} has multiple entries; use the details editor`,409);
  }}
- for(const [userId,group] of groups){userDb(userId).transaction(()=>{for(const cell of group)replaceEffortCell(userId,cell);})();}
+ for(const [userId,group] of groups){migrateEngineer(userId);userDb(userId).transaction(()=>{for(const cell of group){
+  const db=userDb(userId);
+  const before=db.prepare('SELECT * FROM entries WHERE date=? AND task_id=? AND kind=? AND role=?').get(cell.date,cell.task_id,cell.kind,cell.role) as {id:string}|undefined;
+  replaceEffortCell(userId,cell);
+  const after=db.prepare('SELECT * FROM entries WHERE date=? AND task_id=? AND kind=? AND role=?').get(cell.date,cell.task_id,cell.kind,cell.role) as {id:string}|undefined;
+  auditEntry(userId,actor(req).id,after?.id||before?.id||randomUUID(),cell.hours===0?'clear':'update',before,after);
+ }})();}
  return {ok:true,updated:cells.length};
 });
 app.delete('/api/entries/:id',async(req)=>{
   const input=z.object({userId:z.string()}).parse(req.query);canReadUser(req,input.userId);
-  return {deleted:removeEntry(input.userId,(req.params as {id:string}).id)};
+  migrateEngineer(input.userId);const db=userDb(input.userId),id=(req.params as {id:string}).id;
+ return db.transaction(()=>{const before=db.prepare('SELECT * FROM entries WHERE id=?').get(id);
+   const deleted=removeEntry(input.userId,id);
+   if(deleted)auditEntry(input.userId,actor(req).id,id,'delete',before,null);
+   return {deleted};})();
 });
 // Custom supergraphic is served as a sandboxed image, never as an executable document.
 const brandDir=join(DATA_ROOT,'shared','branding');
@@ -330,6 +377,7 @@ async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'|'workboo
   if(mode!=='tasks'){
 
     const sourceIds=[...listTasks().map(x=>x.id),...preview.tasks.map(x=>x.id)];
+    const approvedAliases=new Map(listAliases().map(a=>[a.alias.toLowerCase(),a.task_id]));
     const direct=new Map(sourceIds.map(id=>[id.toLowerCase(),id]));
     const alias=new Map<string,Set<string>>();
     for(const id of sourceIds){const short=id.toLowerCase().match(/^\d+-ip\d+/)?.[0];
@@ -341,7 +389,7 @@ async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'|'workboo
       if(entry.kind==='Task'){
         const raw=entry.task_id.trim(),prefix=raw.toLowerCase().match(/^\d+-ip\d+/)?.[0];
         const matches=prefix?alias.get(prefix):undefined;
-        const id=direct.get(raw.toLowerCase())||(matches?.size===1?[...matches][0]:undefined);
+        const id=direct.get(raw.toLowerCase())||approvedAliases.get(raw.toLowerCase())||(matches?.size===1?[...matches][0]:undefined);
         if(!id)preview.errors.push('Unknown or ambiguous Task ID: '+raw);
         else {if(id!==entry.task_id)normalized++;entry.task_id=id;}
       }
@@ -369,25 +417,38 @@ app.post('/api/import/commit',async(req)=>{
   const {mode,provisionUsers}=z.object({mode:z.enum(['tasks','effort','workbook']),provisionUsers:z.enum(['0','1']).default('0')}).parse(req.query);
   const {preview,bytes}=await receiveWorkbook(req,mode,provisionUsers==='1');
   if(preview.errors.length||!preview.rows)throw httpError(`Import rejected: ${preview.errors.slice(0,4).join('; ') || 'No rows'}`);
-  if(mode==='workbook'&&provisionUsers){
-    const existing=new Set(listUsers().map(u=>u.id));
-    for(const id of new Set(preview.engineers||preview.entries.map(e=>e.user_id)))if(!existing.has(id)){
-      createUser({id,name:id,password:randomUUID()+randomUUID(),active:false});
+  const jobId=beginImport(actor(req).id,mode,bytes,preview.tasks.length,preview.entries.length);
+  const processed:string[]=[];
+  try{
+    if(mode==='workbook'&&provisionUsers){
+      const existing=new Set(listUsers().map(u=>u.id));
+      for(const id of new Set(preview.engineers||preview.entries.map(e=>e.user_id)))if(!existing.has(id)){
+        createUser({id,name:id,password:randomUUID()+randomUUID(),active:false});migrateEngineer(id);
+      }
     }
-  }
-  if(mode!=='effort')central.transaction(()=>{for(const task of preview.tasks)upsertTask(task);})();
-  if(mode!=='tasks'){
-    const group=new Map<string,typeof preview.entries>();
-    for(const entry of preview.entries){const list=group.get(entry.user_id)||[];list.push(entry);group.set(entry.user_id,list);}
-    // Each user DB commits transactionally; imports spanning multiple engineers cannot be atomic across databases.
-    for(const [userId,rows] of group){
-      const db=userDb(userId);
-      db.transaction(()=>{for(const {user_id,...record} of rows)addEntry(user_id,record);})();
+    if(mode!=='effort')central.transaction(()=>{for(const task of preview.tasks)writeTaskWithAudit(task,actor(req).id);})();
+    if(mode!=='tasks'){
+      const groups=new Map<string,typeof preview.entries>();
+      for(const entry of preview.entries){const rows=groups.get(entry.user_id)||[];rows.push(entry);groups.set(entry.user_id,rows);}
+      for(const [userId,rows] of groups){
+        migrateEngineer(userId);const db=userDb(userId);
+        db.transaction(()=>{for(const {user_id,...record} of rows){
+          const old=db.prepare('SELECT * FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note=?')
+            .get(record.date,record.task_id,record.kind,record.role,record.note);
+          const fresh=addEntry(user_id,record);
+          auditEntry(user_id,actor(req).id,fresh.id,old?'import-update':'import-create',old,fresh);
+        }})();
+        processed.push(userId);
+      }
     }
+    updateImport(jobId,'completed',processed);
+  }catch(error){
+    updateImport(jobId,processed.length?'partial':'failed',processed,(error as Error).message);
+    throw error;
   }
-  const folder=mode==='effort'?join(DATA_ROOT,'users',actor(req).id,'imports'):join(DATA_ROOT,'shared','imports');
+    const folder=mode==='effort'?join(DATA_ROOT,'users',actor(req).id,'imports'):join(DATA_ROOT,'shared','imports');
   mkdirSync(folder,{recursive:true});writeFileSync(join(folder,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID()}.xlsx`),bytes);
-  return {ok:true,mode,imported:mode==='tasks'?preview.tasks.length:mode==='effort'?preview.entries.length:preview.tasks.length+preview.entries.length};
+  return {ok:true,jobId,mode,imported:mode==='tasks'?preview.tasks.length:mode==='effort'?preview.entries.length:preview.tasks.length+preview.entries.length};
 });
 app.setNotFoundHandler((req,reply)=>{
   if(req.url.startsWith('/api/'))return reply.code(404).send({error:'Not found'});
