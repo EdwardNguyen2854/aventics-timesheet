@@ -1,5 +1,5 @@
-import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent,type ClipboardEvent,type KeyboardEvent} from 'react';
-import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,Plus,Download,Upload,ChevronLeft,ChevronRight,Search,RefreshCw,X,Trash2,Check,AlertTriangle,LogOut,Database,LockKeyhole} from 'lucide-react';
+import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent,type ClipboardEvent,type KeyboardEvent,type PointerEvent,type CSSProperties} from 'react';
+import {LayoutDashboard,CalendarDays,ListChecks,Users,FileSpreadsheet,Settings,Plus,Download,Upload,ChevronLeft,ChevronRight,Search,RefreshCw,X,Trash2,Check,AlertTriangle,LogOut,Database,LockKeyhole,PanelLeftClose,PanelLeftOpen,RotateCcw} from 'lucide-react';
 import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,type Engineer,type Task,type Entry,type Overview,type ImportPreview,TRACKING_COLUMNS} from './api';
 
 type Page='overview'|'timesheet'|'tasks'|'team'|'exchange'|'admin';
@@ -288,11 +288,96 @@ function TaskEditor({initial,onClose,onSaved}:{initial:Omit<Task,'updated_at'>;o
    </form>
  </section></div>;
 }
+// Column sizes are browser preferences only; they never modify Task Tracking records.
+const TRACKING_WIDTH_KEY='aventics-timesheet.tracking-column-widths.v1';
+const SIDEBAR_COLLAPSED_KEY='aventics-timesheet.sidebar-collapsed.v1';
+const MIN_TRACKING_WIDTH=72;
+const MAX_TRACKING_WIDTH=720;
+const TRACKING_DEFAULT_WIDTHS:Record<string,number>={
+ serial_no:108,ip_no:136,series:100,revision:100,id:194,name:250,email_subject:350,
+ engineer:134,qc_engineer:134,estimated_ex:136,actual_ex_baseline:126,
+ estimated_qc:154,actual_qc_baseline:126,rework_effort:138,status:130,
+ planned_start_date:170,start_date:170,planned_completion_date:176,completion_date:176,
+ activity_code:136,required_internal:260,self_qc_completion_date:216,
+ internal_errors:162,flexibility:154,customer_approval_date:182,task_type:138,
+ code_add:134,code_update:142,total_estimated:162,total_actual:154,
+ mu_execution:120,mu_qc:104
+};
+function trackingWidth(key:string,overrides:Record<string,number>):number{
+ const stored=overrides[key];
+ return typeof stored==='number'&&Number.isFinite(stored)?Math.max(MIN_TRACKING_WIDTH,Math.min(MAX_TRACKING_WIDTH,stored)):(TRACKING_DEFAULT_WIDTHS[key]??140);
+}
+function readStoredWidths():Record<string,number>{
+ try{
+   const raw=localStorage.getItem(TRACKING_WIDTH_KEY);
+   if(!raw)return {};
+   const parsed:unknown=JSON.parse(raw);
+   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return {};
+   return Object.fromEntries(Object.entries(parsed).filter(([k,v])=>
+      Object.hasOwn(TRACKING_DEFAULT_WIDTHS,k)&&typeof v==='number'&&Number.isFinite(v)
+   ));
+ }catch{return {};}
+}
 function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh:()=>void;flash:(s:string)=>void;month:string}){
  const [search,setSearch]=useState(''),[status,setStatus]=useState('All');
  const [editing,setEditing]=useState<Omit<Task,'updated_at'>|null>(null),[editMode,setEditMode]=useState(false);
  const [active,setActive]=useState<{taskId:string;column:number;draft:string}|null>(null),[err,setErr]=useState('');
  const saving=useRef(new Set<string>()),isAdmin=overview.role==='admin';
+ const [columnWidths,setColumnWidths]=useState<Record<string,number>>(readStoredWidths);
+ const scrollRef=useRef<HTMLDivElement>(null);
+ const tableRef=useRef<HTMLTableElement>(null);
+ const dragging=useRef<{pointerId:number;key:string;startX:number;startWidth:number;startTotal:number;currentWidth:number;col:HTMLTableColElement|null}|null>(null);
+ const widthOf=(key:string)=>trackingWidth(key,columnWidths);
+ const totalWidth=TRACKING_COLUMNS.reduce((acc,c)=>acc+widthOf(c.key),isAdmin?112:0);
+ useEffect(()=>{try{localStorage.setItem(TRACKING_WIDTH_KEY,JSON.stringify(columnWidths));}catch{}},[columnWidths]);
+ function setWidth(key:string,width:number){
+   setColumnWidths(old=>({...old,[key]:Math.max(MIN_TRACKING_WIDTH,Math.min(MAX_TRACKING_WIDTH,Math.round(width)))}));
+ }
+ function beginResize(e:PointerEvent<HTMLDivElement>,key:string){
+   if(e.button!==0)return;
+   e.preventDefault();e.stopPropagation();
+   const width=widthOf(key);
+   const col=Array.from(tableRef.current?.querySelectorAll('col[data-column-key]')||[])
+     .find(element=>element.getAttribute('data-column-key')===key) as HTMLTableColElement|undefined;
+   dragging.current={pointerId:e.pointerId,key,startX:e.clientX,startWidth:width,startTotal:totalWidth,currentWidth:width,col:col??null};
+   e.currentTarget.setPointerCapture(e.pointerId);
+ }
+ function duringResize(e:PointerEvent<HTMLDivElement>){
+   const drag=dragging.current;
+   if(!drag||drag.pointerId!==e.pointerId)return;
+   const width=Math.max(MIN_TRACKING_WIDTH,Math.min(MAX_TRACKING_WIDTH,Math.round(drag.startWidth+e.clientX-drag.startX)));
+   if(width===drag.currentWidth)return;
+   drag.currentWidth=width;
+   // Update the table during dragging without rerendering every row on every pointer event.
+   if(drag.col)drag.col.style.width=`${width}px`;
+   if(tableRef.current){
+     tableRef.current.style.width=`${drag.startTotal+width-drag.startWidth}px`;
+     if(drag.key===TRACKING_COLUMNS[0]?.key)tableRef.current.style.setProperty('--tracking-first-width',`${width}px`);
+   }
+ }
+ function endResize(e:PointerEvent<HTMLDivElement>){
+   const drag=dragging.current;
+   if(!drag||drag.pointerId!==e.pointerId)return;
+   dragging.current=null;
+   setWidth(drag.key,drag.currentWidth);
+   if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);
+ }
+ function autoFitColumn(key:string,column:number){
+   const ctx=document.createElement('canvas').getContext('2d');
+   if(ctx)ctx.font='600 11px "Segoe UI", Arial, sans-serif';
+   const textWidth=(text:string)=>ctx?ctx.measureText(text).width:text.length*7;
+   const content=Math.max(textWidth(TRACKING_COLUMNS[column]?.header||''),...filtered.map(t=>textWidth(display(t,column))));
+   setWidth(key,Math.ceil(content+30));
+ }
+ function resizeWithKeyboard(e:KeyboardEvent<HTMLDivElement>,key:string){
+   if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;
+   e.preventDefault();e.stopPropagation();
+   setWidth(key,widthOf(key)+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?32:12));
+ }
+ function scrollColumns(direction:-1|1){
+   const node=scrollRef.current;if(!node)return;
+   node.scrollBy({left:direction*Math.max(260,Math.round(node.clientWidth*.8)),behavior:'smooth'});
+ }
  const filtered=overview.tasks.filter(t=>(status==='All'||status===t.status)&&`${t.id} ${t.name} ${t.ip_no} ${t.serial_no} ${t.series} ${t.revision} ${t.engineer} ${t.qc_engineer}`.toLowerCase().includes(search.toLowerCase()));
  const display=(t:Task,col:number)=>fieldDisplay(t,TRACKING_COLUMNS[col]!,overview);
  async function saveCell(cell:{taskId:string;column:number;draft:string},next?:{taskId:string;column:number}){
@@ -338,11 +423,14 @@ function TasksPage({overview,onRefresh,flash,month}:{overview:Overview;onRefresh
  <button className="btn primary" onClick={()=>setEditing({...emptyTask})}><Plus size={15}/>Add task</button></>}</div></div>
  {err&&<div className="error-msg" role="alert">{err}<button className="icon-btn" onClick={()=>setErr('')} aria-label="Dismiss"><X size={13}/></button></div>}
  {editMode&&<div className="edit-rail"><strong>EDIT MODE</strong> Click a field to edit · Tab/Enter navigate · paste Excel rows. Task ID and computed totals are read-only. Imported actual hours are historical baselines plus logged time.</div>}
- <section className="panel"><div className="panel-header"><h2>Task Tracking</h2><span className="subtle">32 columns · scroll horizontally · dates YYYY-MM-DD · totals calculated</span></div>
- <div className="table-scroll tracking-scroll"><table className="tracking-grid"><thead><tr>{TRACKING_COLUMNS.map(c=><th title={c.header} key={c.key}>{c.header}</th>)}{isAdmin&&<th>Actions</th>}</tr></thead><tbody>
+ <section className="panel"><div className="panel-header tracking-header"><div><h2>Task Tracking</h2><span className="subtle">Drag header borders to resize · scroll horizontally · double-click border to auto-fit a column</span></div><div className="tracking-tools"><button className="btn small" type="button" onClick={()=>scrollColumns(-1)} aria-label="Scroll columns left" title="Scroll columns left"><ChevronLeft size={15}/></button><button className="btn small" type="button" onClick={()=>scrollColumns(1)} aria-label="Scroll columns right" title="Scroll columns right"><ChevronRight size={15}/></button><button className="btn small" type="button" onClick={()=>setColumnWidths({})} title="Restore the default widths for all columns"><RotateCcw size={13}/>Reset widths</button></div></div>
+ <div className="table-scroll tracking-scroll" ref={scrollRef} tabIndex={0} aria-label="Task Tracking table — use horizontal scrolling to see additional columns">
+ <table ref={tableRef} className="tracking-grid" style={{width:totalWidth,'--tracking-first-width':`${widthOf(TRACKING_COLUMNS[0]!.key)}px`} as CSSProperties}>
+ <colgroup>{TRACKING_COLUMNS.map(c=><col key={c.key} data-column-key={c.key} style={{width:widthOf(c.key)}}/>)}{isAdmin&&<col style={{width:112}}/>}</colgroup>
+ <thead><tr>{TRACKING_COLUMNS.map(c=><th scope="col" title={c.header} key={c.key}><span className="tracking-heading">{c.header}</span><div className="tracking-resizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={MIN_TRACKING_WIDTH} aria-valuemax={MAX_TRACKING_WIDTH} aria-valuenow={widthOf(c.key)} aria-label={`Resize ${c.header} column`} title={`Drag to resize ${c.header} · double-click to auto-fit · arrow keys to resize`} onPointerDown={e=>beginResize(e,c.key)} onPointerMove={duringResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onDoubleClick={()=>autoFitColumn(c.key,TRACKING_COLUMNS.findIndex(column=>column.key===c.key))} onKeyDown={e=>resizeWithKeyboard(e,c.key)}/></th>)}{isAdmin&&<th scope="col">Actions</th>}</tr></thead><tbody>
  {filtered.map(t=><tr key={t.id}>{TRACKING_COLUMNS.map((column,i)=>{
    const isActive=active?.taskId===t.id&&active.column===i,editable=isAdmin&&editMode&&column.type!=='calculated'&&column.key!=='id';
-   return <td key={column.key} className={`${column.type==='number'||column.type==='calculated'?'num':''} ${column.key==='id'?'mono':''}`} title={column.header}>
+   return <td key={column.key} className={`${column.type==='number'||column.type==='calculated'?'num':''} ${column.key==='id'?'mono':''}`} title={display(t,i)||column.header}>
      {isActive?<input autoFocus className="tracking-input" aria-label={`${column.header} for ${t.id}`} type={column.type==='number'?'number':column.type==='date'?'date':'text'}
         step={column.type==='number'?'0.25':undefined} value={active!.draft} onFocus={e=>e.target.select()}
         onChange={e=>setActive(a=>a?{...a,draft:e.target.value}:a)} onBlur={()=>void saveCell(active!)}
@@ -396,6 +484,8 @@ function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:str
 }
 export default function App(){
  const [brandRevision,setBrandRevision]=useState(0);
+ const [sidebarCollapsed,setSidebarCollapsed]=useState(()=>{try{return localStorage.getItem(SIDEBAR_COLLAPSED_KEY)==='1';}catch{return false;}});
+ useEffect(()=>{try{localStorage.setItem(SIDEBAR_COLLAPSED_KEY,sidebarCollapsed?'1':'0');}catch{}},[sidebarCollapsed]);
  const [currentUser,setCurrentUser]=useState<Engineer|null>(null),[checking,setChecking]=useState(true),[page,setPage]=useState<Page>('overview'),[month,setMonth]=useState(isoMonth(new Date())),[selectedUser,setSelectedUser]=useState(''),[overview,setOverview]=useState<Overview|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const flash=(message:string)=>{setNotice(message);};
  useEffect(()=>{api<{user:Engineer}>('/auth/me').then(r=>{setCurrentUser(r.user);setSelectedUser(r.user.id);}).catch(()=>{}).finally(()=>setChecking(false));},[]);
@@ -409,9 +499,9 @@ export default function App(){
  const selected=overview?.users.find(u=>u.id===selectedUser);
  const pages=NAV.filter(([key])=>key!=='admin'||!!currentUser.is_admin);
  const meta:Record<Page,[string,string]>={overview:['Overview','Team effort, tracking and monthly activity'],timesheet:['Timesheet','Daily execution, QC and non-project hours'],tasks:['Task Tracking','32-column project task tracking with estimated and actual effort'],team:['Team capacity','Review daily workload across the team'],exchange:['Import / Export','Excel templates and controlled data exchange'],admin:['Administration','Engineer accounts and access']};
- return <div className="app-shell"><Supergraphic revision={brandRevision}/>
+ return <div className={`app-shell ${sidebarCollapsed?'sidebar-collapsed':''}`}><Supergraphic revision={brandRevision}/>
  <header className="topbar"><div className="brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Timesheet</strong></div></div><div className="header-context"><span className="header-label">ENGINEERING OPERATIONS</span><span className="header-divider"/><span className={error?"offline-dot":"online-dot"}/><span>{error?"Connection problem":"Internal server"}</span></div><div className="account"><div className="user-circle">{currentUser.name.slice(0,2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><small>{currentUser.is_admin?'Administrator':'Engineer'}</small></div><button className="icon-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div></header>
- <aside className="sidebar"><div className="sidebar-label">WORKSPACE</div><nav>{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS TIMESHEET</span><small>v0.2.0 · Web</small></div></aside>
+ <aside className="sidebar" aria-label="Workspace navigation"><div className="sidebar-heading"><div className="sidebar-label">WORKSPACE</div><button type="button" className="sidebar-toggle" onClick={()=>setSidebarCollapsed(v=>!v)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}</button></div><nav aria-label="Workspace pages">{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} title={sidebarCollapsed?label:undefined} aria-label={label} aria-current={page===key?'page':undefined} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS TIMESHEET</span><small>v0.2.1 · Web</small></div></aside>
  <main className="main"><div className="page-header"><div><div className="crumb">WORKSPACE <ChevronRight size={12}/> {meta[page][0].toUpperCase()}</div><h1>{meta[page][0]}</h1><p>{meta[page][1]}</p></div><div className="page-actions"><div className="month-picker"><button aria-label="Previous month" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button><input type="month" value={month} onChange={e=>setMonth(e.target.value)}/><button aria-label="Next month" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button></div><button className="btn small" onClick={()=>void refresh()} title="Refresh"><RefreshCw size={14}/>{loading?'Loading…':'Refresh'}</button></div></div>
  {notice&&<Notice message={notice} onClose={()=>setNotice('')}/>} {error&&<div className="error-msg">{error}</div>}
  {!overview?<div className="empty large">{loading?'Loading team data…':'No data available.'}</div>:<>

@@ -1,6 +1,6 @@
 # Aventics Timesheet
 
-**Aventics Suite** · internal web application · v0.2.0 (development starter)
+**Aventics Suite** · internal web application · v0.2.1 (development starter)
 
 A browser-based engineering effort tracker that links daily time entries to a shared task register by **Task ID**. React + TypeScript frontend, Fastify + TypeScript API, SQLite file storage on a single internal server. **No Electron, no desktop client.**
 
@@ -77,6 +77,16 @@ The directory name is the engineer's immutable slug-style username. Personnel ca
 **Older workbook compatibility:** `Tasks` and row-based `Effort` sheets remain supported. Engineers are identified by their login IDs (case-insensitive); create user accounts before importing.
 
 Categories: `Task`, `Meeting/Training`, `Public Holiday`, `Full-day Leave`, `Half-day Leave - 1st`, `Half-day Leave - 2nd`, `Other`. Valid hours: quarter-hour increments, 0.25–24, with 0 allowed for direct cell clear.
+
+## Task Tracking table controls
+
+The 32-column **Task Tracking** table keeps real column widths instead of compressing all fields to the viewport.
+
+- Scroll horizontally with the table scrollbar or the **left/right** buttons above the table. The first two columns, **Serial no.** and **Project ID**, remain frozen.
+- Drag the right edge of a column header to resize that column. Double-click the edge to auto-fit its visible values. Focus the header divider and use **Left/Right Arrow** (hold Shift for larger steps) for keyboard resizing.
+- Select **Reset widths** to restore all default column widths. Custom widths are stored in browser local storage, not in team/SQLite data; each browser can have its own layout.
+- Use the icon button at the top of the navigation sidebar to **collapse** or **expand** it. The preference is retained on that browser.
+- The existing **Edit like Excel** mode continues to support in-cell editing and TSV paste. Layout preferences do not modify effort records.
 
 ## Task-tracking mapping
 

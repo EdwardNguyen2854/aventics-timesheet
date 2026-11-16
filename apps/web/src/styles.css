@@ -26,16 +26,34 @@
 .editable-day .excel-cell:hover,.tracking-cell:hover{box-shadow:inset 0 0 0 2px var(--av-blue);background:#fff;cursor:cell}
 .excel-input,.tracking-input{width:100%;min-width:0;height:31px;border:2px solid var(--av-blue);background:#fff;text-align:center;color:var(--av-ink);font:600 11px var(--av-font-sans);outline:0;padding:0 2px}
 .excel-input::-webkit-outer-spin-button,.excel-input::-webkit-inner-spin-button{margin:0}
-.tracking-scroll{max-height:680px;overflow:auto}.tracking-grid{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:10.5px}
-.tracking-grid th,.tracking-grid td{min-width:126px;max-width:300px;height:34px;padding:5px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid var(--av-line);border-bottom:1px solid var(--av-line)}
-.tracking-grid th{position:sticky;top:0;z-index:5;text-align:left;background:#25313b;color:white;line-height:1.25;letter-spacing:0;text-transform:none;white-space:normal;vertical-align:middle}
-.tracking-grid td:nth-child(1),.tracking-grid th:nth-child(1){position:sticky;left:0;z-index:3;width:96px;min-width:96px;max-width:96px;background:#fff}
-.tracking-grid td:nth-child(2),.tracking-grid th:nth-child(2){position:sticky;left:96px;z-index:3;width:120px;min-width:120px;max-width:120px;background:#fff}
-.tracking-grid th:nth-child(1),.tracking-grid th:nth-child(2){z-index:7;background:#25313b;color:#fff}
-.tracking-grid td:nth-child(5){font-family:var(--av-font-mono);min-width:190px}.tracking-grid td:nth-child(6){min-width:220px}.tracking-grid td:nth-child(7){min-width:320px;max-width:320px}
-.tracking-grid td.num{text-align:right;font-variant-numeric:tabular-nums}.tracking-grid tr:hover td:nth-child(1),.tracking-grid tr:hover td:nth-child(2){background:#f3f8fa}
+/* Task Tracking is a wide spreadsheet; never let generic table styles shrink its columns. */
+.tracking-header{flex-wrap:wrap}
+.tracking-header>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tracking-tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.tracking-tools .btn.small{height:29px}
+.tracking-scroll{max-width:100%;max-height:min(68vh,680px);overflow:auto;overscroll-behavior-x:contain;scrollbar-gutter:stable;scrollbar-color:#9da8b1 #e9ebec}
+.tracking-scroll::-webkit-scrollbar{width:12px;height:15px}
+.tracking-scroll::-webkit-scrollbar-thumb{background:#9da8b1;border:3px solid #e9ebec}
+.tracking-scroll::-webkit-scrollbar-track{background:#e9ebec}
+.tracking-scroll:focus-visible{outline:2px solid var(--av-blue);outline-offset:-2px}
+.table-scroll .tracking-grid{border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:0;max-width:none;font-size:10.5px}
+.table-scroll .tracking-grid th,.table-scroll .tracking-grid td{min-width:0;max-width:none;box-sizing:border-box;height:38px;padding:6px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid var(--av-line);border-bottom:1px solid var(--av-line)}
+.table-scroll .tracking-grid th{position:sticky;top:0;z-index:5;height:64px;padding-right:18px;overflow:visible;text-align:left;background:#25313b;color:#fff;line-height:1.3;letter-spacing:0;text-transform:none;white-space:normal;vertical-align:middle}
+.tracking-heading{display:block;max-height:55px;overflow:hidden;overflow-wrap:anywhere}
+.table-scroll .tracking-grid td:nth-child(1),.table-scroll .tracking-grid th:nth-child(1){position:sticky;left:0;z-index:3;background:#fff}
+.table-scroll .tracking-grid td:nth-child(2),.table-scroll .tracking-grid th:nth-child(2){position:sticky;left:var(--tracking-first-width);z-index:3;background:#fff}
+.table-scroll .tracking-grid th:nth-child(1),.table-scroll .tracking-grid th:nth-child(2){z-index:7;background:#25313b;color:#fff}
+.table-scroll .tracking-grid td:nth-child(5){font-family:var(--av-font-mono)}
+.table-scroll .tracking-grid td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tracking-grid tr:hover td:nth-child(1),.tracking-grid tr:hover td:nth-child(2){background:#f3f8fa}
 .tracking-cell{display:block;width:100%;min-height:26px;padding:3px 5px;text-align:inherit;border:1px solid transparent;background:transparent;font:inherit;color:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tracking-grid td.num .tracking-cell{text-align:right}.tracking-input{text-align:left;max-width:100%;padding:0 6px}.tracking-grid td.num .tracking-input{text-align:right}
+.tracking-grid td.num .tracking-cell{text-align:right}
+.tracking-input{width:100%;min-width:0;height:31px;border:2px solid var(--av-blue);background:#fff;text-align:left;color:var(--av-ink);font:600 11px var(--av-font-sans);outline:0;padding:0 6px}
+.tracking-grid td.num .tracking-input{text-align:right}
+.tracking-resizer{position:absolute;top:0;right:0;height:100%;width:12px;cursor:col-resize;touch-action:none;user-select:none;z-index:2}
+.tracking-resizer::after{content:'';position:absolute;right:3px;top:10px;bottom:10px;width:2px;background:rgba(255,255,255,.25)}
+.tracking-resizer:hover::after,.tracking-resizer:focus-visible::after,.tracking-resizer:active::after{background:#80d0ff;width:3px}
+.tracking-resizer:focus-visible{outline:2px solid #80d0ff;outline-offset:-3px}
 .full-task-editor{width:min(1050px,calc(100vw - 32px))}.task-editor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 14px;margin-top:14px}
 .task-editor-fields>label{min-width:0;display:flex;flex-direction:column;gap:5px;font-size:10px;font-weight:650;color:#555;margin-bottom:6px}
 .task-editor-fields .input{width:100%;font-weight:400}.brand-upload{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0}.brand-upload .file-input{flex:1;min-width:230px;max-width:550px}
@@ -52,3 +70,23 @@
 .metric-track{height:13px;background:var(--av-surface-alt);display:flex;overflow:hidden}.metric-track i{display:block;height:100%;flex-shrink:0}.metric-blue{background:var(--av-blue)}.metric-green{background:var(--av-green)}.metric-gray{background:#bfc3c7}
 @media(max-width:1180px){.insights-grid{grid-template-columns:1fr}.task-editor-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.excel-grid .col-engineer{width:87px;min-width:87px;max-width:87px}.excel-grid .col-status{left:87px;width:100px;min-width:100px;max-width:100px}.excel-grid .col-task{left:187px;width:148px;min-width:148px;max-width:148px}.excel-grid .col-role{left:335px}.excel-grid .col-sum{left:389px}.task-editor-fields{grid-template-columns:1fr}.insight-layout{flex-wrap:wrap}.metric-row{grid-template-columns:80px minmax(40px,1fr) 48px}}
+
+/* Collapsible navigation: preserve main-content width for wide engineering tables. */
+.app-shell.sidebar-collapsed{grid-template-columns:64px minmax(0,1fr)}
+.sidebar-heading{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:10px;min-height:32px}
+.sidebar-heading .sidebar-label{padding:0 0 0 12px}
+.sidebar-toggle{width:32px;height:32px;flex:0 0 32px;border:1px solid transparent;background:transparent;color:var(--av-muted);display:grid;place-items:center}
+.sidebar-toggle:hover{background:var(--av-blue-soft);color:var(--av-blue-deep)}
+.app-shell.sidebar-collapsed .sidebar{padding:16px 7px}
+.app-shell.sidebar-collapsed .sidebar-heading{justify-content:center}
+.app-shell.sidebar-collapsed .sidebar-label,.app-shell.sidebar-collapsed .sidebar nav span,.app-shell.sidebar-collapsed .sidebar-bottom{display:none}
+.app-shell.sidebar-collapsed .sidebar nav button{justify-content:center;gap:0;padding:0}
+.app-shell.sidebar-collapsed .sidebar nav button svg{flex-shrink:0}
+@media(max-width:720px){
+ .app-shell:not(.sidebar-collapsed){grid-template-columns:210px minmax(0,1fr)}
+ .app-shell:not(.sidebar-collapsed) .sidebar{padding:15px 7px}
+ .app-shell:not(.sidebar-collapsed) .sidebar-label,.app-shell:not(.sidebar-collapsed) .sidebar nav span{display:block}
+ .app-shell:not(.sidebar-collapsed) .sidebar nav button{justify-content:flex-start;padding:0 12px;gap:12px}
+ .app-shell.sidebar-collapsed{grid-template-columns:62px minmax(0,1fr)}
+ .app-shell:not(.sidebar-collapsed) .sidebar-bottom{display:none}
+}
