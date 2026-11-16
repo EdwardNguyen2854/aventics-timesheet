@@ -257,7 +257,7 @@ app.post('/api/entries',async(req)=>{
     const saved=addEntry(user_id,data);auditEntry(user_id,actor(req).id,saved.id,previous?'update':'create',previous,saved);return saved;})();
 });
 // Spreadsheet-style cell updates; owner/admin authorization and conflict checks on server.
-const cellSchema=z.object({user_id:z.string(),date:z.string(),task_id:z.string().default(''),kind:z.enum(ENTRY_KINDS),role:z.enum(ROLES),hours:z.number().finite().min(0).max(24)});
+const cellSchema=z.object({user_id:z.string(),date:z.string(),task_id:z.string().default(''),kind:z.enum(ENTRY_KINDS),role:z.enum(ROLES),hours:z.number().finite().min(0).max(24),expected_hours:z.number().finite().min(0).max(24).optional()});
 app.post('/api/effort-cells',async(req)=>{
  const {cells}=z.object({cells:z.array(cellSchema).min(1).max(1000)}).parse(req.body);
  const seen=new Set<string>(),groups=new Map<string,typeof cells>();
@@ -273,6 +273,10 @@ app.post('/api/effort-cells',async(req)=>{
  for(const [userId,group] of groups){const db=userDb(userId);for(const cell of group){
    const {n}=db.prepare('SELECT COUNT(*) n FROM entries WHERE date=? AND task_id=? AND kind=? AND role=?').get(cell.date,cell.task_id,cell.kind,cell.role) as {n:number};
    if(n>1)throw httpError(`Cell ${cell.date} / ${cell.task_id||cell.kind} has multiple entries; use the details editor`,409);
+   if(cell.expected_hours!==undefined){
+     const current=db.prepare('SELECT COALESCE(SUM(hours),0) total FROM entries WHERE date=? AND task_id=? AND kind=? AND role=?').get(cell.date,cell.task_id,cell.kind,cell.role) as {total:number};
+     if(Math.abs(current.total-cell.expected_hours)>0.00001)throw httpError('Cell changed since you opened it; refresh before overwriting.',409);
+   }
  }}
  for(const [userId,group] of groups){migrateEngineer(userId);userDb(userId).transaction(()=>{for(const cell of group){
   const db=userDb(userId);
@@ -407,6 +411,31 @@ async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'|'workboo
       else preview.errors.push(message+'. Create them or select provision disabled accounts on the full workbook import.');
     }
   }
+  // Audit-friendly, read-only reconciliation. Task fields are compared only when supplied in the input sheet.
+  const reconciliation={newTasks:0,changedTasks:0,unchangedTasks:0,newEntries:0,changedEntries:0,identicalEntries:0,taskDiffs:[] as Array<{task_id:string;field:string;existing:string;incoming:string}>};
+  const knownTasks=new Map(listTasks().map(t=>[t.id,t]));
+  const presentFields=preview.present_task_fields||[];
+  for(const incoming of preview.tasks){
+    const old=knownTasks.get(incoming.id);
+    if(!old){reconciliation.newTasks++;continue;}
+    let changed=false;
+    for(const field of presentFields){
+      const before=String((old as unknown as Record<string,unknown>)[field]??'');
+      const after=String((incoming as unknown as Record<string,unknown>)[field]??'');
+      if(before===after)continue;changed=true;
+      if(reconciliation.taskDiffs.length<100)reconciliation.taskDiffs.push({task_id:incoming.id,field,existing:before,incoming:after});
+    }
+    if(changed)reconciliation.changedTasks++;else reconciliation.unchangedTasks++;
+  }
+  for(const entry of preview.entries){
+    const userExists=central.prepare('SELECT 1 FROM users WHERE id=?').get(entry.user_id);
+    if(!userExists){reconciliation.newEntries++;continue;}
+    const existing=userDb(entry.user_id).prepare('SELECT hours FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note=?').get(entry.date,entry.task_id,entry.kind,entry.role,entry.note) as {hours:number}|undefined;
+    if(!existing)reconciliation.newEntries++;
+    else if(Math.abs(existing.hours-entry.hours)>0.00001)reconciliation.changedEntries++;
+    else reconciliation.identicalEntries++;
+  }
+  preview.reconciliation=reconciliation;
   return {preview,bytes};
 }
 app.post('/api/import/preview',async(req)=>{
@@ -414,10 +443,12 @@ app.post('/api/import/preview',async(req)=>{
   const {preview}=await receiveWorkbook(req,mode,provisionUsers==='1');return preview;
 });
 app.post('/api/import/commit',async(req)=>{
-  const {mode,provisionUsers}=z.object({mode:z.enum(['tasks','effort','workbook']),provisionUsers:z.enum(['0','1']).default('0')}).parse(req.query);
+  const {mode,provisionUsers,conflictPolicy}=z.object({mode:z.enum(['tasks','effort','workbook']),provisionUsers:z.enum(['0','1']).default('0'),conflictPolicy:z.enum(['overwrite','keep-existing']).default('overwrite')}).parse(req.query);
   const {preview,bytes}=await receiveWorkbook(req,mode,provisionUsers==='1');
   if(preview.errors.length||!preview.rows)throw httpError(`Import rejected: ${preview.errors.slice(0,4).join('; ') || 'No rows'}`);
-  const jobId=beginImport(actor(req).id,mode,bytes,preview.tasks.length,preview.entries.length);
+  // Snapshot before writing across independent SQLite files; safe recovery is an offline, coordinated restore.
+  const backup=actor(req).is_admin?await backupAll():null;
+  const jobId=beginImport(actor(req).id,mode,bytes,preview.tasks.length,preview.entries.length,backup?.id||'');
   const processed:string[]=[];
   try{
     if(mode==='workbook'&&provisionUsers){
@@ -426,7 +457,10 @@ app.post('/api/import/commit',async(req)=>{
         createUser({id,name:id,password:randomUUID()+randomUUID(),active:false});migrateEngineer(id);
       }
     }
-    if(mode!=='effort')central.transaction(()=>{for(const task of preview.tasks)writeTaskWithAudit(task,actor(req).id);})();
+    if(mode!=='effort')central.transaction(()=>{for(const task of preview.tasks){
+      if(conflictPolicy==='keep-existing'&&central.prepare('SELECT 1 FROM tasks WHERE id=?').get(task.id))continue;
+      writeTaskWithAudit(task,actor(req).id);
+    }})();
     if(mode!=='tasks'){
       const groups=new Map<string,typeof preview.entries>();
       for(const entry of preview.entries){const rows=groups.get(entry.user_id)||[];rows.push(entry);groups.set(entry.user_id,rows);}
@@ -435,6 +469,7 @@ app.post('/api/import/commit',async(req)=>{
         db.transaction(()=>{for(const {user_id,...record} of rows){
           const old=db.prepare('SELECT * FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note=?')
             .get(record.date,record.task_id,record.kind,record.role,record.note);
+          if(conflictPolicy==='keep-existing'&&old)continue;
           const fresh=addEntry(user_id,record);
           auditEntry(user_id,actor(req).id,fresh.id,old?'import-update':'import-create',old,fresh);
         }})();
@@ -448,7 +483,7 @@ app.post('/api/import/commit',async(req)=>{
   }
     const folder=mode==='effort'?join(DATA_ROOT,'users',actor(req).id,'imports'):join(DATA_ROOT,'shared','imports');
   mkdirSync(folder,{recursive:true});writeFileSync(join(folder,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID()}.xlsx`),bytes);
-  return {ok:true,jobId,mode,imported:mode==='tasks'?preview.tasks.length:mode==='effort'?preview.entries.length:preview.tasks.length+preview.entries.length};
+  return {ok:true,jobId,backupId:backup?.id||null,conflictPolicy,mode,imported:mode==='tasks'?preview.tasks.length:mode==='effort'?preview.entries.length:preview.tasks.length+preview.entries.length};
 });
 app.setNotFoundHandler((req,reply)=>{
   if(req.url.startsWith('/api/'))return reply.code(404).send({error:'Not found'});

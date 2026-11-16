@@ -181,3 +181,19 @@
 .wt-grid-data-cell{position:absolute;top:0;height:33px;display:grid;place-items:center;box-sizing:border-box;border-right:1px solid #e3e7e8;font-size:10px;color:#a7afb4}
 .wt-grid-data-cell.heat-1{background:#edf8f0;color:#225f3c}.wt-grid-data-cell.heat-2{background:#d0ebd7;color:#195b35}.wt-grid-data-cell.heat-3{background:#a8daba;color:#155830}.wt-grid-data-cell.heat-4{background:#75c692;color:#124c2b}.wt-grid-data-cell.heat-5{background:#2f9b5d;color:#fff}
 .wt-grid-data-cell.is-selected{outline:2px solid #007bc0;outline-offset:-2px;z-index:2}.wt-grid-data-cell .wt-hour-button{width:100%;height:100%;background:transparent;border:0;font-size:10px;font-weight:650;color:inherit}.wt-grid-data-cell .wt-hour-button:hover{outline:2px solid #007bc0;outline-offset:-2px;cursor:cell}.wt-grid-data-cell .excel-input{height:31px}.wt-total-cell{font-weight:750}
+
+/* User-specific Task Tracking layouts and column management */
+.wt-column-picker{position:relative}.wt-column-picker summary{cursor:pointer;list-style:none;display:inline-flex}.wt-column-picker summary::-webkit-details-marker{display:none}
+.wt-column-options{position:absolute;top:34px;right:0;width:300px;max-height:410px;overflow:auto;z-index:20;background:#fff;border:1px solid #bdc6ce;box-shadow:0 5px 20px #1b2e3b22;padding:8px}
+.wt-column-option{display:flex;align-items:center;gap:2px;border-bottom:1px solid #e9ecee;min-height:27px}.wt-column-option label{flex:1;font-size:10px;display:flex;align-items:center;gap:6px}.wt-column-option .icon-btn{height:25px;width:25px}
+.tracking-grid.wt-density-comfortable td{height:50px!important;padding-top:10px!important;padding-bottom:10px!important}.tracking-grid.wt-density-comfortable th{height:76px!important}
+/* WorkTrack administration panels */
+.wt-operations{display:grid;gap:16px;margin-top:16px}.wt-operations .panel-header h2{display:flex;align-items:center;gap:8px}.wt-alias-form{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:10px;align-items:end;margin-bottom:16px}.wt-alias-form label{display:grid;gap:6px;font-size:11px;font-weight:650}.wt-alias-form .btn{height:34px}
+@media(max-width:760px){.wt-alias-form{grid-template-columns:1fr}}
+/* WorkTrack administrator operations panels */
+.wt-operations{display:grid;gap:16px;margin-top:16px}.wt-operations .panel-header h2{display:flex;align-items:center;gap:8px}.wt-alias-form{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:10px;align-items:end;margin-bottom:16px}.wt-alias-form label{display:grid;gap:6px;font-size:11px;font-weight:650}.wt-alias-form .btn{height:34px}
+@media(max-width:760px){.wt-alias-form{grid-template-columns:1fr}}
+
+/* Import reconciliation */
+.wt-reconciliation-summary{display:grid;grid-template-columns:repeat(6,minmax(80px,1fr));gap:8px;margin:12px 0}.wt-reconciliation-summary>div{border:1px solid var(--av-line);background:#f8fafb;padding:10px}.wt-reconciliation-summary small{display:block;font-size:9px;color:var(--av-muted)}.wt-reconciliation-summary strong{font-size:19px;font-variant-numeric:tabular-nums}.wt-reconciliation-diffs{padding:10px 0;border-top:1px solid var(--av-line)}.wt-reconciliation-diffs summary{cursor:pointer;font-weight:650;font-size:11px;margin:7px 0}.wt-reconciliation-diffs td{max-width:350px;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:1050px){.wt-reconciliation-summary{grid-template-columns:repeat(3,minmax(80px,1fr))}}

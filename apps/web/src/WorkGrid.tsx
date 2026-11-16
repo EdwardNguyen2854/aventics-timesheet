@@ -22,6 +22,8 @@ interface WorkGridProps {
   renderCell: (row: WorkGridRow, date: string) => ReactNode;
   onTaskOpen?: (taskId: string) => void;
   onPasteRange?: (start: GridCoordinate, text: string) => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 const META_WIDTHS = [112, 128, 230, 54, 66];
@@ -35,7 +37,7 @@ const between = (n: number, a: number, b: number) => n >= Math.min(a, b) && n <=
 const weekday = (day: string) => new Date(day + 'T00:00:00').toLocaleString('en', {weekday: 'short'});
 
 /** Two-axis virtualization with five frozen identifier columns. No empty cells are persisted. */
-export function WorkGrid({days, rows, userNames, dailyTotals, valueAt, editable, renderCell, onTaskOpen, onPasteRange}: WorkGridProps) {
+export function WorkGrid({days, rows, userNames, dailyTotals, valueAt, editable, renderCell, onTaskOpen, onPasteRange, onUndo, onRedo}: WorkGridProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
   const [position, setPosition] = useState({top: 0, left: 0, width: 1280, height: 550});
@@ -78,7 +80,11 @@ export function WorkGrid({days, rows, userNames, dailyTotals, valueAt, editable,
     else if (y + ROW_HEIGHT > node.scrollTop + node.clientHeight) node.scrollTop = y + ROW_HEIGHT - node.clientHeight;
   }
   function onGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || !selection) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && editable) {
+      event.preventDefault(); if (event.shiftKey) onRedo?.(); else onUndo?.(); return;
+    }
+    if (!selection) return;
     const direction: Record<string, [number, number]> = {ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0]};
     if (event.key === 'Tab') direction.Tab = [0, event.shiftKey ? -1 : 1];
     const step = direction[event.key];

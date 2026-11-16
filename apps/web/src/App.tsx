@@ -4,6 +4,7 @@ import {api,download,upload,daysOfMonth,fmtHours,isoMonth,sum,KINDS,STATUSES,typ
 import {TaskWorkspace} from './TaskWorkspace';
 import {PerformancePage} from './PerformancePage';
 import {WorkGrid,type GridCoordinate} from './WorkGrid';
+import {OperationsPanel} from './OperationsPanel';
 
 type Page='overview'|'timesheet'|'tasks'|'estimation'|'performance'|'team'|'exchange'|'admin';
 const NAV:[Page,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['timesheet','Timesheet',CalendarDays],['tasks','Task Tracking',ListChecks],['estimation','Estimation & Lookup',Calculator],['performance','Performance Analytics',LayoutDashboard],['team','Team capacity',Users],['exchange','Import / Export',FileSpreadsheet],['admin','Administration',Settings]];
@@ -126,7 +127,45 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{
  const [entryModal,setEntryModal]=useState<{userId:string;date:string}|null>(null),[details,setDetails]=useState<{entries:Entry[];userId:string}|null>(null);
  const [search,setSearch]=useState(''),[err,setErr]=useState('');
  const [extraRows,setExtraRows]=useState<GridRow[]>([]),[newTask,setNewTask]=useState(''),[newKind,setNewKind]=useState('Task'),[newRole,setNewRole]=useState('EX'),[newPerson,setNewPerson]=useState('');
- const saving=useRef(new Set<string>());
+ type EffortCell={user_id:string;date:string;task_id:string;kind:string;role:string;hours:number;expected_hours?:number};
+ type BatchHistory={before:EffortCell[];after:EffortCell[]};
+ const saving=useRef(new Set<string>()),undoStack=useRef<BatchHistory[]>([]),redoStack=useRef<BatchHistory[]>([]);
+ const [historyRevision,setHistoryRevision]=useState(0);
+ const getCurrent=(c:EffortCell)=>{
+   const row=rows.find(r=>r.userId===c.user_id&&r.taskId===c.task_id&&r.kind===c.kind&&r.role===c.role);
+   return row?valueFor(row,c.date):0;
+ };
+ async function sendBatch(batch:EffortCell[],record=true){
+   const unique=new Set<string>();const changed:EffortCell[]=[];const before:EffortCell[]=[];
+   for(const input of batch){
+     const key=JSON.stringify([input.user_id,input.date,input.task_id,input.kind,input.role]);
+     if(unique.has(key)){setErr('Duplicate destination in selection');return false;}unique.add(key);
+     const current=getCurrent(input);
+     if(current===input.hours)continue;
+     changed.push({...input,expected_hours:current});
+     before.push({...input,hours:current});
+   }
+   if(!changed.length)return true;
+   try{
+     await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:changed})});
+     if(record){undoStack.current.push({before,after:changed});redoStack.current=[];setHistoryRevision(v=>v+1);}
+     flash(changed.length+' effort cell(s) saved');refresh();return true;
+   }catch(e){setErr((e as Error).message);return false;}
+ }
+ async function undoChange(){
+   const item=undoStack.current.at(-1);if(!item)return;
+   try{
+     await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:item.before.map((c,i)=>({...c,expected_hours:item.after[i]!.hours}))})});
+     undoStack.current.pop();redoStack.current.push(item);setHistoryRevision(v=>v+1);flash('Undo saved');refresh();
+   }catch(e){setErr((e as Error).message);}
+ }
+ async function redoChange(){
+   const item=redoStack.current.at(-1);if(!item)return;
+   try{
+     await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:item.after.map((c,i)=>({...c,expected_hours:item.before[i]!.hours}))})});
+     redoStack.current.pop();undoStack.current.push(item);setHistoryRevision(v=>v+1);flash('Redo saved');refresh();
+   }catch(e){setErr((e as Error).message);}
+ }
  useEffect(()=>{setActive(null);setExtraRows([]);},[year,period,selectedUser]);
  const taskMap=useMemo(()=>new Map(overview.tasks.map(t=>[t.id,t])),[overview.tasks]);
  const userMap=useMemo(()=>new Map(users.map(u=>[u.id,u])),[users]);
@@ -164,9 +203,8 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{
    if(entriesFor(row,cell.date).length>1){setErr('This cell contains multiple entries with notes. Use View mode to manage them individually.');return;}
    if(hours===valueFor(row,cell.date)){setActive(next?{...next,draft:String(valueFor(rows.find(r=>r.key===next.key)||row,next.date)||'')}:null);return;}
    saving.current.add(id);setActive(next?{...next,draft:String(valueFor(rows.find(r=>r.key===next.key)||row,next.date)||'')}:null);setErr('');
-   try{await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:[{user_id:row.userId,date:cell.date,task_id:row.taskId,kind:row.kind,role:row.role,hours}]})});
-     flash('Cell saved');refresh();
-   }catch(error){setErr((error as Error).message);}finally{saving.current.delete(id);}
+   try{await sendBatch([{user_id:row.userId,date:cell.date,task_id:row.taskId,kind:row.kind,role:row.role,hours}]);}
+   finally{saving.current.delete(id);}
  }
  async function pasteCells(event:ClipboardEvent<HTMLInputElement>,cell:{key:string;date:string;draft:string}){
    const text=event.clipboardData.getData('text/plain');if(!text.includes('\t')&&!text.includes('\n'))return;
@@ -182,8 +220,7 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{
      cells.push({user_id:row.userId,date,task_id:row.taskId,kind:row.kind,role:row.role,hours});
    }
    if(!cells.length)return;const pasteKey=cell.key+'@'+cell.date;saving.current.add(pasteKey);setActive(null);setErr('');
-   try{await api<{updated:number}>('/effort-cells',{method:'POST',body:JSON.stringify({cells})});flash(`${cells.length} cells pasted`);refresh();}
-   catch(error){setErr((error as Error).message);}finally{saving.current.delete(pasteKey);}
+   try{await sendBatch(cells);}finally{saving.current.delete(pasteKey);}
  }
  async function pasteVirtual(start:GridCoordinate,text:string){
   const lines=text.replace(/\r/g,'').replace(/\n$/,'').split('\n').map(line=>line.split('\t'));
@@ -196,8 +233,7 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{
    batch.push({user_id:row.userId,date,task_id:row.taskId,kind:row.kind,role:row.role,hours});
   }
   if(batch.length>1000){setErr('Paste limit is 1,000 cells. Split into smaller ranges.');return;}
-  try{await api('/effort-cells',{method:'POST',body:JSON.stringify({cells:batch})});flash(`${batch.length} cells saved`);refresh();}
-  catch(e){setErr((e as Error).message);}
+  await sendBatch(batch);
  }
  function move(cell:{key:string;date:string;draft:string},event:KeyboardEvent<HTMLInputElement>){
    if(event.key==='Escape'){event.preventDefault();setActive(null);return;}
@@ -220,7 +256,9 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{
      {isAdmin&&<option value="all">All engineers</option>}{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
    </select><div className="search-wrap"><Search size={15}/><input aria-label="Filter timesheet" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter engineer / task / status"/></div>
  </div><div className="toolbar-right"><span className="subtle">{rows.length} rows · {allView?'Team':userMap.get(selectedUser)?.name||selectedUser}{rangeBusy?' · Loading…':''}</span>
-   <button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
+       {editMode&&<><button className="btn small" disabled={!undoStack.current.length} title={"Undo saved cell operation (Ctrl+Z) · revision "+historyRevision} onClick={()=>void undoChange()}>Undo</button>
+    <button className="btn small" disabled={!redoStack.current.length} title="Redo saved cell operation (Ctrl+Shift+Z)" onClick={()=>void redoChange()}>Redo</button></>}
+    <button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
    <button className="btn primary" onClick={()=>setEntryModal({userId:allView?users[0]?.id||'':selectedUser,date:days.includes(today())?today():days[0]||String(year)+'-01-01'})}><Plus size={14}/>Log effort</button>
  </div></div>
  {rangeError&&<div className="error-msg" role="alert">{rangeError}</div>}
@@ -235,6 +273,7 @@ function TimesheetPage({overview,selectedUser,onUser,refresh,flash,onOpenTask}:{
  <section className="panel"><div className="panel-header"><h2>{period==='all'?'Full-year effort grid':'Monthly effort grid'}</h2><span className="subtle">{period==='all'?'All months · '+year:year+'-'+period} · frozen task columns · scroll horizontally</span></div>
  <WorkGrid days={days} rows={rows} userNames={new Map(users.map(u=>[u.id,u.name]))} dailyTotals={daily} valueAt={valueFor}
    editable={editMode} onTaskOpen={onOpenTask} onPasteRange={(start,text)=>void pasteVirtual(start,text)}
+   onUndo={()=>void undoChange()} onRedo={()=>void redoChange()}
    renderCell={(row,date)=>{
     const records=entriesFor(row,date),value=sum(records),isActive=active?.key===row.key&&active.date===date;
     return isActive?<input autoFocus aria-label={`Edit ${row.userId} ${row.taskId||row.kind} ${date}`} className="excel-input" inputMode="decimal" value={active!.draft}
@@ -346,7 +385,8 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
  const isPinnedCol=(column:string)=>!!marker('column','',column)?.pinned;
  const freeze=(i:number):CSSProperties=>{
    if(i<2||!isPinnedCol(TRACKING_COLUMNS[i]?.key||''))return {};
-   const pinnedBefore=TRACKING_COLUMNS.slice(2,i).filter(c=>isPinnedCol(c.key));
+   const location=visibleColumns.findIndex(x=>x.index===i);
+   const pinnedBefore=visibleColumns.slice(2,location).map(x=>x.column).filter(c=>isPinnedCol(c.key));
    const left=widthOf(TRACKING_COLUMNS[0]!.key)+widthOf(TRACKING_COLUMNS[1]!.key)+pinnedBefore.reduce((acc,c)=>acc+widthOf(c.key),0);
    return {position:'sticky',left,zIndex:4,background:'#fff'};
  };
@@ -361,11 +401,44 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
  }catch(e){setErr((e as Error).message);}finally{setMarkBusy(false);}}
 
  const [columnWidths,setColumnWidths]=useState<Record<string,number>>(readStoredWidths);
+ const [hiddenColumns,setHiddenColumns]=useState<string[]>([]),[columnOrder,setColumnOrder]=useState<string[]>([]),[density,setDensity]=useState<'compact'|'comfortable'>('compact');
+ const [viewSaving,setViewSaving]=useState(false);
+ useEffect(()=>{let live=true;
+   api<Array<{id:string;config:Record<string,unknown>}>>('/views').then(views=>{
+     if(!live)return;
+     const saved=views.find(v=>v.id==='task-tracking')?.config;
+     if(!saved)return;
+     if(saved.widths&&typeof saved.widths==='object'&&!Array.isArray(saved.widths))setColumnWidths(saved.widths as Record<string,number>);
+     if(Array.isArray(saved.hidden))setHiddenColumns(saved.hidden.filter(x=>typeof x==='string'));
+     if(Array.isArray(saved.order))setColumnOrder(saved.order.filter(x=>typeof x==='string'));
+     if(typeof saved.status==='string')setStatus(saved.status);
+     if(typeof saved.search==='string')setSearch(saved.search);
+     if(saved.density==='comfortable')setDensity('comfortable');
+   }).catch(()=>{});
+   return()=>{live=false;};
+ },[]);
+ async function saveMyView(){setViewSaving(true);try{
+   await api('/views/task-tracking',{method:'PUT',body:JSON.stringify({config:{widths:columnWidths,hidden:hiddenColumns,order:columnOrder,status,search,density}})});
+   flash('Task Tracking view saved to your account');
+ }catch(e){setErr((e as Error).message);}finally{setViewSaving(false);}}
+ function moveColumn(key:string,delta:number){
+   const current=[...new Set([...columnOrder,...TRACKING_COLUMNS.map(c=>c.key)])].filter(k=>k!=='serial_no'&&k!=='ip_no');
+   const index=current.indexOf(key),target=index+delta;
+   if(index<0||target<0||target>=current.length)return;
+   [current[index],current[target]]=[current[target]!,current[index]!];setColumnOrder(current);
+ }
+ const orderedColumns=[...TRACKING_COLUMNS.slice(0,2),...TRACKING_COLUMNS.slice(2).sort((a,b)=>{
+   const ai=columnOrder.indexOf(a.key),bi=columnOrder.indexOf(b.key);
+   return (ai<0?1000+TRACKING_COLUMNS.findIndex(c=>c.key===a.key):ai)-(bi<0?1000+TRACKING_COLUMNS.findIndex(c=>c.key===b.key):bi);
+ })];
+ const visibleColumns=orderedColumns.filter(c=>!hiddenColumns.includes(c.key)||['serial_no','ip_no','id'].includes(c.key))
+   .map(c=>({column:c,index:TRACKING_COLUMNS.findIndex(x=>x.key===c.key)}));
+
  const scrollRef=useRef<HTMLDivElement>(null);
  const tableRef=useRef<HTMLTableElement>(null);
  const dragging=useRef<{pointerId:number;key:string;startX:number;startWidth:number;startTotal:number;currentWidth:number;col:HTMLTableColElement|null}|null>(null);
  const widthOf=(key:string)=>trackingWidth(key,columnWidths);
- const totalWidth=TRACKING_COLUMNS.reduce((acc,c)=>acc+widthOf(c.key),isAdmin?112:0);
+ const totalWidth=visibleColumns.reduce((acc,c)=>acc+widthOf(c.column.key),isAdmin?212:0);
  useEffect(()=>{try{localStorage.setItem(TRACKING_WIDTH_KEY,JSON.stringify(columnWidths));}catch{}},[columnWidths]);
  function setWidth(key:string,width:number){
    setColumnWidths(old=>({...old,[key]:Math.max(MIN_TRACKING_WIDTH,Math.min(MAX_TRACKING_WIDTH,Math.round(width)))}));
@@ -424,7 +497,7 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
    setActive(next?{...next,draft:display(filtered.find(t=>t.id===next.taskId)!,next.column)}:null);
    if(JSON.stringify(updated)===JSON.stringify(task))return;
    saving.current.add(unique);setErr('');
-   try{const {updated_at,...payload}=updated;await api('/tasks',{method:'POST',body:JSON.stringify(payload)});flash('Task updated');onRefresh();}
+   try{const {updated_at,...payload}=updated;await api('/tasks',{method:'POST',body:JSON.stringify({...payload,expected_updated_at:task.updated_at})});flash('Task updated');onRefresh();}
    catch(error){setErr((error as Error).message);}finally{saving.current.delete(unique);}
  }
  function moveCell(cell:{taskId:string;column:number;draft:string},event:KeyboardEvent<HTMLInputElement>){
@@ -432,7 +505,9 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
    if(!['Tab','Enter'].includes(event.key))return;
    event.preventDefault();const rowIndex=filtered.findIndex(t=>t.id===cell.taskId);
    const row=event.key==='Enter'?filtered[rowIndex+(event.shiftKey?-1:1)]:filtered[rowIndex];
-   const col=event.key==='Tab'?cell.column+(event.shiftKey?-1:1):cell.column;
+   const viewIndex=visibleColumns.findIndex(v=>v.index===cell.column);
+   const nextVisual=event.key==='Tab'?viewIndex+(event.shiftKey?-1:1):viewIndex;
+   const col=visibleColumns[nextVisual]?.index??-1;
    const column=TRACKING_COLUMNS[col];
    void saveCell(cell,row&&column&&column.type!=='calculated'&&column.key!=='id'?{taskId:row.id,column:col}:undefined);
  }
@@ -441,7 +516,7 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
    event.preventDefault();const rows=text.replace(/\r/g,'').trimEnd().split('\n').map(line=>line.split('\t'));
    const start=filtered.findIndex(t=>t.id===cell.taskId),updates=new Map<string,Task>();
    for(let r=0;r<rows.length;r++)for(let c=0;c<(rows[r]?.length||0);c++){
-     const original=filtered[start+r],col=TRACKING_COLUMNS[cell.column+c];
+     const original=filtered[start+r],col=visibleColumns[visibleColumns.findIndex(v=>v.index===cell.column)+c]?.column;
      if(!original||!col){setErr('Pasted range exceeds visible Task Tracking cells; nothing changed.');return;}
      if(col.key==='id'||col.type==='calculated')continue;
      const previous=updates.get(original.id)||original;
@@ -455,17 +530,20 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
  }
  return <><div className="toolbar panel-toolbar"><div className="toolbar-left"><div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search task, project, engineer"/></div>
  <select className="input short" value={status} onChange={e=>setStatus(e.target.value)}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
- <div className="toolbar-right"><span className="subtle">{filtered.length} / {overview.tasks.length} records · {TRACKING_COLUMNS.length} columns</span>
+ <div className="toolbar-right"><span className="subtle">{filtered.length} / {overview.tasks.length} records · {visibleColumns.length} of {TRACKING_COLUMNS.length} columns</span>
  {isAdmin&&<><button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
  <button className="btn primary" onClick={()=>setEditing({...emptyTask})}><Plus size={15}/>Add task</button></>}</div></div>
  {err&&<div className="error-msg" role="alert">{err}<button className="icon-btn" onClick={()=>setErr('')} aria-label="Dismiss"><X size={13}/></button></div>}
  {editMode&&<div className="edit-rail"><strong>EDIT MODE</strong> Click a field to edit · Tab/Enter navigate · paste Excel rows. Task ID and computed totals are read-only. Imported actual hours are historical baselines plus logged time.</div>}
- <section className="panel"><div className="panel-header tracking-header"><div><h2>Task Tracking</h2><span className="subtle">Resize header borders · right-click any column or cell to pin, highlight or recolor</span></div><div className="tracking-tools"><button className="btn small" type="button" onClick={()=>scrollColumns(-1)} aria-label="Scroll columns left" title="Scroll columns left"><ChevronLeft size={15}/></button><button className="btn small" type="button" onClick={()=>scrollColumns(1)} aria-label="Scroll columns right" title="Scroll columns right"><ChevronRight size={15}/></button><button className="btn small" type="button" onClick={()=>setColumnWidths({})} title="Restore the default widths for all columns"><RotateCcw size={13}/>Reset widths</button></div></div>
+ <section className="panel"><div className="panel-header tracking-header"><div><h2>Task Tracking</h2><span className="subtle">Resize header borders · right-click any column or cell to pin, highlight or recolor</span></div><div className="tracking-tools"><button className="btn small" type="button" onClick={()=>scrollColumns(-1)} aria-label="Scroll columns left" title="Scroll columns left"><ChevronLeft size={15}/></button><button className="btn small" type="button" onClick={()=>scrollColumns(1)} aria-label="Scroll columns right" title="Scroll columns right"><ChevronRight size={15}/></button><details className="wt-column-picker"><summary className="btn small">Columns</summary><div className="wt-column-options">{orderedColumns.map(c=><div key={c.key} className="wt-column-option"><label><input type="checkbox" checked={!hiddenColumns.includes(c.key)||['serial_no','ip_no','id'].includes(c.key)} disabled={['serial_no','ip_no','id'].includes(c.key)} onChange={e=>setHiddenColumns(prev=>e.target.checked?prev.filter(x=>x!==c.key):[...prev,c.key])}/>{c.header}</label><button className="icon-btn" aria-label={'Move '+c.header+' left'} disabled={['serial_no','ip_no'].includes(c.key)} onClick={()=>moveColumn(c.key,-1)}>‹</button><button className="icon-btn" aria-label={'Move '+c.header+' right'} disabled={['serial_no','ip_no'].includes(c.key)} onClick={()=>moveColumn(c.key,1)}>›</button></div>)}</div></details>
+<button className="btn small" type="button" onClick={()=>setDensity(v=>v==='compact'?'comfortable':'compact')}>{density==='compact'?'Comfortable':'Compact'} density</button>
+<button className="btn small" type="button" disabled={viewSaving} onClick={()=>void saveMyView()}>Save my view</button>
+<button className="btn small" type="button" onClick={()=>{setColumnWidths({});setHiddenColumns([]);setColumnOrder([]);setStatus('All');setSearch('');setDensity('compact');}} title="Reset personal view"><RotateCcw size={13}/>Reset layout</button></div></div>
  <div className="table-scroll tracking-scroll" ref={scrollRef} tabIndex={0} aria-label="Task Tracking table — use horizontal scrolling to see additional columns">
- <table ref={tableRef} className="tracking-grid" style={{width:totalWidth,'--tracking-first-width':`${widthOf(TRACKING_COLUMNS[0]!.key)}px`} as CSSProperties}>
- <colgroup>{TRACKING_COLUMNS.map(c=><col key={c.key} data-column-key={c.key} style={{width:widthOf(c.key)}}/>)}{isAdmin&&<col style={{width:112}}/>}</colgroup>
- <thead><tr>{TRACKING_COLUMNS.map((c,i)=><th scope="col" title={c.header+' · right-click to mark'} key={c.key} onContextMenu={e=>{e.preventDefault();openMark('column','',c.key);}} style={{...freeze(i),...(marker('column','',c.key)?.fill_color?{background:marker('column','',c.key)!.fill_color}:{}),...(marker('column','',c.key)?.text_color?{color:marker('column','',c.key)!.text_color}:{})}}><span className="tracking-heading">{marker('column','',c.key)?.pinned&&<Pin size={11}/>} {c.header}</span><div className="tracking-resizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={MIN_TRACKING_WIDTH} aria-valuemax={MAX_TRACKING_WIDTH} aria-valuenow={widthOf(c.key)} aria-label={`Resize ${c.header} column`} title={`Drag to resize ${c.header} · double-click to auto-fit · arrow keys to resize`} onPointerDown={e=>beginResize(e,c.key)} onPointerMove={duringResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onDoubleClick={()=>autoFitColumn(c.key,TRACKING_COLUMNS.findIndex(column=>column.key===c.key))} onKeyDown={e=>resizeWithKeyboard(e,c.key)}/></th>)}{isAdmin&&<th scope="col">Actions</th>}</tr></thead><tbody>
- {filtered.map(t=><tr key={t.id} className={marker('row',t.id)?.pinned?'tracking-row-pinned':''}>{TRACKING_COLUMNS.map((column,i)=>{
+ <table ref={tableRef} className={`tracking-grid wt-density-${density}`}  style={{width:totalWidth,'--tracking-first-width':`${widthOf(TRACKING_COLUMNS[0]!.key)}px`} as CSSProperties}>
+ <colgroup>{visibleColumns.map(({column:c})=><col key={c.key} data-column-key={c.key} style={{width:widthOf(c.key)}}/>)}{isAdmin&&<col style={{width:212}}/>}</colgroup>
+ <thead><tr>{visibleColumns.map(({column:c,index:i})=><th scope="col" title={c.header+' · right-click to mark'} key={c.key} onContextMenu={e=>{e.preventDefault();openMark('column','',c.key);}} style={{...freeze(i),...(marker('column','',c.key)?.fill_color?{background:marker('column','',c.key)!.fill_color}:{}),...(marker('column','',c.key)?.text_color?{color:marker('column','',c.key)!.text_color}:{})}}><span className="tracking-heading">{marker('column','',c.key)?.pinned&&<Pin size={11}/>} {c.header}</span><div className="tracking-resizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={MIN_TRACKING_WIDTH} aria-valuemax={MAX_TRACKING_WIDTH} aria-valuenow={widthOf(c.key)} aria-label={`Resize ${c.header} column`} title={`Drag to resize ${c.header} · double-click to auto-fit · arrow keys to resize`} onPointerDown={e=>beginResize(e,c.key)} onPointerMove={duringResize} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={endResize} onDoubleClick={()=>autoFitColumn(c.key,TRACKING_COLUMNS.findIndex(column=>column.key===c.key))} onKeyDown={e=>resizeWithKeyboard(e,c.key)}/></th>)}{isAdmin&&<th scope="col">Actions</th>}</tr></thead><tbody>
+ {filtered.map(t=><tr key={t.id} className={marker('row',t.id)?.pinned?'tracking-row-pinned':''}>{visibleColumns.map(({column,index:i})=>{
    const isActive=active?.taskId===t.id&&active.column===i,editable=isAdmin&&editMode&&column.type!=='calculated'&&column.key!=='id';
    const mark=markFor(t.id,column.key);
    return <td key={column.key} className={`${column.type==='number'||column.type==='calculated'?'num':''} ${column.key==='id'?'mono':''}`} title={(display(t,i)||column.header)+' · right-click to mark'}
@@ -479,7 +557,7 @@ function TasksPage({overview,onRefresh,flash,month,onOpenTask}:{overview:Overvie
      :column.key==='status'?<Status value={t.status}/>:<>{mark?.pinned&&<Pin size={11}/>} {display(t,i)||'·'}</>}
    </td>;
  })}{isAdmin&&<td><div className="tracking-row-actions"><button className="btn small" onClick={()=>onOpenTask(t.id)}>Open</button><button className="btn small" onClick={()=>{const {updated_at,...initial}=t;setEditing(initial);}}>Edit</button><button className="icon-btn" title="Mark or pin this row" onClick={()=>openMark('row',t.id)}><Pin size={14}/></button></div></td>}</tr>)}
- {!filtered.length&&<tr><td colSpan={TRACKING_COLUMNS.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
+ {!filtered.length&&<tr><td colSpan={visibleColumns.length+(isAdmin?1:0)} className="empty">No tasks match the filters. Import Task Tracking or add a task.</td></tr>}
  </tbody></table></div></section>
  {markEditor&&<div className="modal-backdrop" onClick={()=>setMarkEditor(null)}><section className="modal mark-dialog" role="dialog" aria-modal="true" aria-label="Mark Task Tracking area" onClick={e=>e.stopPropagation()}>
  <div className="panel-header"><h2><Palette size={16}/> Mark / pin {markEditor.scope}</h2><button className="icon-btn" onClick={()=>setMarkEditor(null)} aria-label="Close"><X size={15}/></button></div>
@@ -577,15 +655,30 @@ function TeamPage({overview,month}:{overview:Overview;month:string}){
  <section className="panel"><div className="panel-header"><h2>Category breakdown</h2></div><div className="table-scroll"><table><thead><tr><th>Engineer</th><th>EX</th><th>QC</th><th>Meetings / Other</th><th>Leave / Holidays</th><th>Total</th><th>Days over 8 h</th></tr></thead><tbody>{byUser.map(({user,entries})=><tr key={user.id}><td><strong>{user.name}</strong></td><td className="num">{fmtHours(sum(entries,e=>e.role==='EX'))}</td><td className="num">{fmtHours(sum(entries,e=>e.role==='QC'))}</td><td className="num">{fmtHours(sum(entries,e=>e.kind==='Meeting/Training'||e.kind==='Other'))}</td><td className="num">{fmtHours(sum(entries,e=>e.kind.includes('Leave')||e.kind==='Public Holiday'))}</td><td className="num strong">{fmtHours(sum(entries))}</td><td className="num">{days.filter(d=>sum(entries,e=>e.date===d)>8).length}</td></tr>)}</tbody></table></div></section></>;
 }
 function ExchangePage({isAdmin,refresh,flash,month,selectedUser}:{isAdmin:boolean;refresh:()=>void;flash:(s:string)=>void;month:string;selectedUser:string}){
- const [mode,setMode]=useState<'tasks'|'effort'|'workbook'>('workbook'),[file,setFile]=useState<File|null>(null),[preview,setPreview]=useState<ImportPreview|null>(null),[busy,setBusy]=useState(false),[err,setErr]=useState(''),inputRef=useRef<HTMLInputElement|null>(null),[provisionUsers,setProvisionUsers]=useState(true);
- async function importAction(commit:boolean){if(!file)return;setBusy(true);setErr('');try{if(commit){const response=await upload<{imported:number}>('/import/commit?mode='+mode+'&provisionUsers='+(provisionUsers?'1':'0'),file);flash(`${response.imported} records imported`);setPreview(null);setFile(null);if(inputRef.current)inputRef.current.value='';refresh();}else{setPreview(await upload<ImportPreview>('/import/preview?mode='+mode+'&provisionUsers='+(provisionUsers?'1':'0'),file));}}catch(e){setErr((e as Error).message);}finally{setBusy(false);}}
- return <><div className="two-col"><section className="panel"><div className="panel-header"><h2>Import workbook</h2><span className="status neutral">PREVIEW FIRST</span></div><div className="panel-body"><p className="muted">Use the Aventics Excel template. Preview all rows before writing to the internal server.</p><label>Import data type<select className="input" value={mode} onChange={e=>{setMode(e.target.value as 'tasks'|'effort'|'workbook');setPreview(null);}}>{isAdmin&&<option value="workbook">Full workbook · Task Tracking + Timesheet</option>}<option value="effort">Timesheet · daily columns (Timesheet sheet)</option>{isAdmin&&<option value="tasks">Task Tracking · 32 columns (Task Tracking sheet)</option>}</select></label>{isAdmin&&mode==='workbook'&&<label className="check-line"><input type="checkbox" checked={provisionUsers} onChange={e=>{setProvisionUsers(e.target.checked);setPreview(null);}}/>Provision missing engineers as inactive accounts (set passwords and activate them later)</label>}<label>Workbook (.xlsx)<input ref={inputRef} className="input file-input" type="file" accept=".xlsx" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);}}/></label><div className="button-line"><button className="btn" onClick={()=>void download(`/template?month=${month}`,'aventics-timesheet-template.xlsx')}><Download size={15}/>Download template</button><button className="btn primary" disabled={!file||busy} onClick={()=>void importAction(false)}><Upload size={15}/>{busy?'Processing…':'Preview import'}</button></div>{err&&<div className="error-msg">{err}</div>}</div></section>
+ const [mode,setMode]=useState<'tasks'|'effort'|'workbook'>('workbook'),[file,setFile]=useState<File|null>(null),[preview,setPreview]=useState<ImportPreview|null>(null),[busy,setBusy]=useState(false),[err,setErr]=useState(''),inputRef=useRef<HTMLInputElement|null>(null),[provisionUsers,setProvisionUsers]=useState(true),[conflictPolicy,setConflictPolicy]=useState<'overwrite'|'keep-existing'>('keep-existing');
+ async function importAction(commit:boolean){if(!file)return;setBusy(true);setErr('');try{if(commit){const response=await upload<{imported:number;jobId:string;backupId:string|null}>('/import/commit?mode='+mode+'&provisionUsers='+(provisionUsers?'1':'0')+'&conflictPolicy='+conflictPolicy,file);flash(`${response.imported} records processed · Job ${response.jobId.slice(0,8)}${response.backupId?' · Backup '+response.backupId:''}`);setPreview(null);setFile(null);if(inputRef.current)inputRef.current.value='';refresh();}else{setPreview(await upload<ImportPreview>('/import/preview?mode='+mode+'&provisionUsers='+(provisionUsers?'1':'0'),file));}}catch(e){setErr((e as Error).message);}finally{setBusy(false);}}
+ return <><div className="two-col"><section className="panel"><div className="panel-header"><h2>Import workbook</h2><span className="status neutral">PREVIEW FIRST</span></div><div className="panel-body"><p className="muted">Use the Aventics Excel template. Preview all rows before writing to the internal server.</p><label>Import data type<select className="input" value={mode} onChange={e=>{setMode(e.target.value as 'tasks'|'effort'|'workbook');setPreview(null);}}>{isAdmin&&<option value="workbook">Full workbook · Task Tracking + Timesheet</option>}<option value="effort">Timesheet · daily columns (Timesheet sheet)</option>{isAdmin&&<option value="tasks">Task Tracking · 32 columns (Task Tracking sheet)</option>}</select></label>{isAdmin&&mode==='workbook'&&<label className="check-line"><input type="checkbox" checked={provisionUsers} onChange={e=>{setProvisionUsers(e.target.checked);setPreview(null);}}/>Provision missing engineers as inactive accounts (set passwords and activate them later)</label>}
+<label>Existing-record policy<select className="input" value={conflictPolicy} onChange={e=>setConflictPolicy(e.target.value as 'overwrite'|'keep-existing')}>
+<option value="keep-existing">Keep existing task and dated effort values</option><option value="overwrite">Use incoming values for matching records</option></select></label>
+<label>Workbook (.xlsx)<input ref={inputRef} className="input file-input" type="file" accept=".xlsx" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);}}/></label><div className="button-line"><button className="btn" onClick={()=>void download(`/template?month=${month}`,'aventics-timesheet-template.xlsx')}><Download size={15}/>Download template</button><button className="btn primary" disabled={!file||busy} onClick={()=>void importAction(false)}><Upload size={15}/>{busy?'Processing…':'Preview import'}</button></div>{err&&<div className="error-msg">{err}</div>}</div></section>
  <section className="panel"><div className="panel-header"><h2>Export data</h2><span className="subtle">Formatted .xlsx</span></div><div className="panel-body"><p className="muted">Export task details or your selected engineer's dated effort. Files are generated without modifying stored data.</p><div className="export-options">{isAdmin&&<div><div><strong>Task Tracking</strong><small>32 Task Tracking columns · historical + logged actuals</small></div><button className="btn small" onClick={()=>void download('/export?mode=tasks','aventics-task-tracking.xlsx')}><Download size={14}/>Export</button></div>}<div><div><strong>Timesheet · {month}</strong><small>Excel-style date columns + detailed entries</small></div><button className="btn small" onClick={()=>void download(`/export?mode=effort&month=${month}&userId=${selectedUser}`,'aventics-timesheet.xlsx')}><Download size={14}/>Export</button></div>{isAdmin&&<div><div><strong>All engineers · {month}</strong><small>Combined monthly effort report</small></div><button className="btn small" onClick={()=>void download(`/export?mode=effort&month=${month}&userId=all`,'aventics-team-timesheet.xlsx')}><Download size={14}/>Export</button></div>}</div></div></section></div>
  {preview&&<section className="panel"><div className="panel-header"><h2>Import preview</h2><span className="subtle">{preview.tasks.length} tasks · {preview.entries.length} dated entries · {preview.errors.length} errors</span></div><div className="panel-body">{preview.errors.length?<div className="error-msg"><strong>Import blocked</strong>{preview.errors.slice(0,12).map((s,i)=><div key={i}>{s}</div>)}</div>:<div className="success-msg"><Check size={16}/>Validation passed. Confirm to write {preview.mode!=='effort'?preview.tasks.length:preview.mode==='effort'?preview.entries.length:preview.tasks.length+preview.entries.length} records.</div>}{preview.warnings.map((s,i)=><div className="warning-msg" key={i}>{s}</div>)}
+{preview.reconciliation&&<>
+<div className="wt-reconciliation-summary"><div><small>NEW TASKS</small><strong>{preview.reconciliation.newTasks}</strong></div>
+<div><small>CHANGED TASKS</small><strong>{preview.reconciliation.changedTasks}</strong></div>
+<div><small>UNCHANGED TASKS</small><strong>{preview.reconciliation.unchangedTasks}</strong></div>
+<div><small>NEW EFFORT</small><strong>{preview.reconciliation.newEntries}</strong></div>
+<div><small>CHANGED EFFORT</small><strong>{preview.reconciliation.changedEntries}</strong></div>
+<div><small>UNCHANGED EFFORT</small><strong>{preview.reconciliation.identicalEntries}</strong></div></div>
+{preview.reconciliation.taskDiffs.length>0&&<details className="wt-reconciliation-diffs"><summary>Review changed Task Tracking fields ({preview.reconciliation.taskDiffs.length} shown)</summary>
+<div className="table-scroll"><table><thead><tr><th>Task ID</th><th>Field</th><th>Existing</th><th>Incoming</th></tr></thead><tbody>
+{preview.reconciliation.taskDiffs.map((diff,i)=><tr key={i}><td>{diff.task_id}</td><td>{diff.field}</td><td>{diff.existing||'—'}</td><td>{diff.incoming||'—'}</td></tr>)}</tbody></table></div></details>}
+<p className="muted">Conflict policy: <strong>{conflictPolicy==='keep-existing'?'Keep existing records':'Use imported values'}</strong>. Imports by administrators create an integrity-checked backup before any writes.</p>
+</>}
  <div className="table-scroll preview-table"><table><thead><tr>{preview.mode!=='effort'?<><th>Task ID</th><th>Status</th><th>Est. EX</th><th>Est. QC</th></>:<><th>Date</th><th>Engineer</th><th>Task ID</th><th>Kind</th><th>Role</th><th>Hours</th></>}</tr></thead><tbody>{(preview.mode!=='effort'?preview.tasks:preview.entries).slice(0,15).map((r,i)=>preview.mode!=='effort'?<tr key={i}><td>{(r as Task).id}</td><td>{(r as Task).status}</td><td>{(r as Task).estimated_ex}</td><td>{(r as Task).estimated_qc}</td></tr>:<tr key={i}><td>{(r as Entry).date}</td><td>{(r as Entry).user_id}</td><td>{(r as Entry).task_id}</td><td>{(r as Entry).kind}</td><td>{(r as Entry).role}</td><td>{(r as Entry).hours}</td></tr>)}</tbody></table></div><div className="modal-actions"><span className="subtle">Showing first 15 rows</span><button className="btn primary" disabled={!!preview.errors.length||!preview.rows||busy} onClick={()=>void importAction(true)}>Confirm import</button></div></div></section>}
  <div className="note-line"><Database size={15}/> Data stays on your internal server. Imports are archived under the engineer's directory; task imports under shared/imports.</div></>;
 }
-function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:string)=>void;onBrandChanged:()=>void}){
+function AdminPage({refresh,flash,onBrandChanged,tasks}:{refresh:()=>void;flash:(s:string)=>void;onBrandChanged:()=>void;tasks:Task[]}){
  const [id,setId]=useState(''),[name,setName]=useState(''),[password,setPassword]=useState(''),[isAdmin,setIsAdmin]=useState(false),[busy,setBusy]=useState(false),[err,setErr]=useState('');
  const [svg,setSvg]=useState<File|null>(null),[brandBusy,setBrandBusy]=useState(false),[brandError,setBrandError]=useState('');
  const [hasCustom,setHasCustom]=useState(false);
@@ -630,7 +723,8 @@ function AdminPage({refresh,flash,onBrandChanged}:{refresh:()=>void;flash:(s:str
  <button className="btn primary" disabled={!svg||brandBusy} onClick={()=>void updateBrand(false)}><Upload size={14}/>Apply SVG</button>
  <button className="btn" disabled={!hasCustom||brandBusy} onClick={()=>void updateBrand(true)}>Restore default</button></div>
  <p className="subtle">SVG only · max 256 KB · no scripts or external resources. The strip uses your image's full width.</p>
- {brandError&&<div className="error-msg" role="alert">{brandError}</div>}</div></section></>;
+ {brandError&&<div className="error-msg" role="alert">{brandError}</div>}</div></section>
+ <OperationsPanel tasks={tasks} flash={flash}/></>;
 }
 export default function App(){
  const [brandRevision,setBrandRevision]=useState(0);
@@ -663,7 +757,7 @@ export default function App(){
   {page==='estimation'&&<EstimationPage overview={overview} onRefresh={()=>void refresh()} flash={flash}/>}
  {page==='team'&&<TeamPage overview={overview} month={month}/>}
  {page==='exchange'&&<ExchangePage isAdmin={!!currentUser.is_admin} refresh={()=>void refresh()} flash={flash} month={month} selectedUser={selectedUser}/>}
- {page==='admin'&&!!currentUser.is_admin&&<AdminPage refresh={()=>void refresh()} flash={flash} onBrandChanged={()=>setBrandRevision(x=>x+1)}/>}
+ {page==='admin'&&!!currentUser.is_admin&&<AdminPage refresh={()=>void refresh()} flash={flash} onBrandChanged={()=>setBrandRevision(x=>x+1)} tasks={overview.tasks}/>}
  </>}{openTaskId&&<TaskWorkspace taskId={openTaskId} onClose={()=>setOpenTaskId(null)}/>}</main><footer className="statusbar"><span><span className={error?"offline-dot":"online-dot"}/>{error?"API error":"Connected to internal API"}</span><span>{overview?.users.length??0} engineers · {overview?.tasks.length??0} registered tasks</span><span><LockKeyhole size={12}/> Local SQLite storage</span></footer>
  </div>;
 }

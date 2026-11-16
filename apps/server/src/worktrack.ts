@@ -15,6 +15,8 @@ export function initializeWorktrack():void{
  CREATE TABLE IF NOT EXISTS import_jobs(id TEXT PRIMARY KEY,actor TEXT NOT NULL,mode TEXT NOT NULL,source_sha256 TEXT NOT NULL,status TEXT NOT NULL,task_count INTEGER NOT NULL DEFAULT 0,entry_count INTEGER NOT NULL DEFAULT 0,processed_users_json TEXT NOT NULL DEFAULT '[]',error_text TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,completed_at TEXT);
  CREATE INDEX IF NOT EXISTS idx_import_jobs_created ON import_jobs(created_at);
  `);
+ const jobColumns=new Set((central.pragma('table_info(import_jobs)') as Array<{name:string}>).map(c=>c.name));
+ if(!jobColumns.has('backup_id'))central.exec("ALTER TABLE import_jobs ADD COLUMN backup_id TEXT NOT NULL DEFAULT ''");
  central.prepare('INSERT OR IGNORE INTO schema_migrations(version) VALUES(4)').run();
  for(const user of listUsers())migrateEngineer(user.id);
 }
@@ -103,9 +105,9 @@ export function setSavedView(userId:string,id:string,config:unknown){
  if(data.length>20000)throw new Error('View configuration too large');
  central.prepare('INSERT INTO saved_views(user_id,view_id,config_json) VALUES(?,?,?) ON CONFLICT(user_id,view_id) DO UPDATE SET config_json=excluded.config_json,updated_at=CURRENT_TIMESTAMP').run(userId,id,data);
 }
-export function beginImport(actor:string,mode:string,source:Buffer,taskCount:number,entryCount:number):string{
+export function beginImport(actor:string,mode:string,source:Buffer,taskCount:number,entryCount:number,backupId=''):string{
  const id=randomUUID(),hash=createHash('sha256').update(source).digest('hex');
- central.prepare('INSERT INTO import_jobs(id,actor,mode,source_sha256,status,task_count,entry_count) VALUES(?,?,?,?,?,?,?)').run(id,actor,mode,hash,'in_progress',taskCount,entryCount);
+ central.prepare('INSERT INTO import_jobs(id,actor,mode,source_sha256,status,task_count,entry_count,backup_id) VALUES(?,?,?,?,?,?,?,?)').run(id,actor,mode,hash,'in_progress',taskCount,entryCount,backupId);
  return id;
 }
 export function updateImport(id:string,status:'completed'|'partial'|'failed',users:string[],error=''){

@@ -4,7 +4,8 @@ import {type Entry, type Task, type TaskEffortRow} from './db.js';
 
 type TaskImport=Omit<Task,'updated_at'>;
 type EntryImport=Pick<Entry,'date'|'task_id'|'kind'|'role'|'hours'|'note'>&{user_id:string};
-export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:TaskImport[];entries:EntryImport[];errors:string[];warnings:string[];present_task_fields?:string[];engineers?:string[];status_hints?:Record<string,string[]>}
+export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:TaskImport[];entries:EntryImport[];errors:string[];warnings:string[];present_task_fields?:string[];engineers?:string[];status_hints?:Record<string,string[]>;
+ reconciliation?:{newTasks:number;changedTasks:number;unchangedTasks:number;newEntries:number;changedEntries:number;identicalEntries:number;taskDiffs:Array<{task_id:string;field:string;existing:string;incoming:string}>};}
 /** Exact 32-column Task Tracking layout. The two total columns and role actuals are computed in the app. */
 export const TRACKING_COLUMNS:ReadonlyArray<{header:string;key:keyof TaskImport|'total_estimated'|'total_actual';kind:'text'|'number'|'date'|'calculated'}>=[
  {header:'Serial no.',key:'serial_no',kind:'text'},{header:'Project ID',key:'ip_no',kind:'text'},
