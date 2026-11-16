@@ -4,7 +4,7 @@ import {type Entry, type Task, type TaskEffortRow} from './db.js';
 
 type TaskImport=Omit<Task,'updated_at'>;
 type EntryImport=Pick<Entry,'date'|'task_id'|'kind'|'role'|'hours'|'note'>&{user_id:string};
-export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:TaskImport[];entries:EntryImport[];errors:string[];warnings:string[];present_task_fields?:string[]}
+export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:TaskImport[];entries:EntryImport[];errors:string[];warnings:string[];present_task_fields?:string[];engineers?:string[];status_hints?:Record<string,string[]>}
 /** Exact 32-column Task Tracking layout. The two total columns and role actuals are computed in the app. */
 export const TRACKING_COLUMNS:ReadonlyArray<{header:string;key:keyof TaskImport|'total_estimated'|'total_actual';kind:'text'|'number'|'date'|'calculated'}>=[
  {header:'Serial no.',key:'serial_no',kind:'text'},{header:'Project ID',key:'ip_no',kind:'text'},
@@ -129,13 +129,22 @@ function parseWideEffort(ws:ExcelJS.Worksheet,result:ImportPreview,actorId:strin
    else if(cellText(c))result.errors.push(`Column ${col}: date header must be DD.MM.YYYY or YYYY-MM-DD`);
  });
  if(!days.length){result.errors.push('Timesheet needs dated columns after Engineer / Status / Task ID / Role');return true;}
- const unique=new Set<string>();
+ const unique=new Set<string>(),engineers=new Set(result.engineers||[]);
+ const statusHints=new Map<string,Set<string>>(Object.entries(result.status_hints||{}).map(([k,v])=>[k,new Set(v)]));
  for(let i=found.row+1;i<=Math.min(ws.rowCount,found.row+10_000);i++){
    const row=ws.getRow(i);const display=cellText(cell(row,found.index,'Engineer')!);
    const task_id=cellText(cell(row,found.index,'Task ID')!),status=cellText(cell(row,found.index,'Status')!),roleRaw=cellText(cell(row,found.index,'Role')!).toUpperCase();
    if(!display&&!task_id&&!roleRaw)continue;
    let user_id='';try{user_id=safeSlug(display||actorId);}catch{result.errors.push(`Row ${i}: invalid Engineer`);continue;}
    if(!isAdmin&&user_id!==actorId){result.errors.push(`Row ${i}: cannot import another engineer`);continue;}
+   engineers.add(user_id);
+   if(task_id&&status){
+     const normalized=status==='Yet to Start'?'Not started':status==='In Progress'?'In progress':status;
+     if(TASK_STATUSES.includes(normalized as any)){
+       const prefix=task_id.toLowerCase().match(/^\d+-ip\d+/)?.[0]||task_id.trim().toLowerCase();
+       const list=statusHints.get(prefix)||new Set<string>();list.add(normalized);statusHints.set(prefix,list);
+     }
+   }
    const kind=task_id?'Task':status;
    const role=task_id?roleRaw:'NA';
    if(!ENTRY_KINDS.includes(kind as any)||!ROLES.includes(role as any)|| (task_id&&role==='NA')){
@@ -149,6 +158,7 @@ function parseWideEffort(ws:ExcelJS.Worksheet,result:ImportPreview,actorId:strin
      result.entries.push({date:day.date,user_id,task_id,kind,role,hours,note:''});
    }
  }
+ result.engineers=[...engineers];result.status_hints=Object.fromEntries([...statusHints].map(([key,value])=>[key,[...value]]));
  if(ws.rowCount>found.row+10_000)result.errors.push('Workbook exceeds 10,000 rows');
  return true;
 }
@@ -189,6 +199,18 @@ export async function parseWorkbook(buffer:Buffer,mode:'tasks'|'effort'|'workboo
    if(mode==='tasks')parseTasks(ws,result);
    else if(!parseWideEffort(ws,result,actorId,isAdmin))parseDetailedEffort(ws,result,actorId,isAdmin);
    if(ws.rowCount>10_015)result.errors.push('Workbook exceeds 10,000 data rows');
+ }
+ if(mode==='workbook'&&result.status_hints){
+   let applied=0,conflicts=0;
+   for(const task of result.tasks){
+     if(task.status!=='Not started')continue;
+     const key=task.id.toLowerCase().match(/^\d+-ip\d+/)?.[0]||task.id.toLowerCase();
+     const choices=result.status_hints[key]||[];
+     if(choices.length===1){task.status=choices[0]!;applied++;}
+     else if(choices.length>1)conflicts++;
+   }
+   if(applied)result.warnings.push('Recovered '+applied+' Task Tracking statuses from Timesheet with unique matches.');
+   if(conflicts)result.warnings.push(conflicts+' tasks have conflicting statuses across roles and need manual review.');
  }
  if(result.rows===0)result.warnings.push('No data rows found');
  if(mode!=='tasks'&&timeSheet?.name==='Timesheet')result.warnings.push('Grid import has no Note column; existing detailed notes remain protected.');

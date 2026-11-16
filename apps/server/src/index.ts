@@ -351,6 +351,7 @@ async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'|'workboo
       const existing=db.prepare("SELECT COUNT(*) n FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note != ''").get(entry.date,entry.task_id,entry.kind,entry.role) as {n:number};
       if(existing.n)preview.errors.push(entry.user_id+' / '+entry.date+' / '+entry.task_id+': existing notes require detail editing');
     }
+    for(const id of preview.engineers||[])if(!users.has(id))missing.add(id);
     if(normalized)preview.warnings.push(normalized+' dated effort entries matched using a unique serial/project Task ID prefix.');
     if(missing.size){
       const message='Missing engineer accounts: '+[...missing].sort().join(', ');
@@ -370,7 +371,7 @@ app.post('/api/import/commit',async(req)=>{
   if(preview.errors.length||!preview.rows)throw httpError(`Import rejected: ${preview.errors.slice(0,4).join('; ') || 'No rows'}`);
   if(mode==='workbook'&&provisionUsers){
     const existing=new Set(listUsers().map(u=>u.id));
-    for(const id of new Set(preview.entries.map(e=>e.user_id)))if(!existing.has(id)){
+    for(const id of new Set(preview.engineers||preview.entries.map(e=>e.user_id)))if(!existing.has(id)){
       createUser({id,name:id,password:randomUUID()+randomUUID(),active:false});
     }
   }

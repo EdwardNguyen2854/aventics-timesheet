@@ -29,7 +29,7 @@ export const TRACKING_COLUMNS:{header:string;key:keyof Task|'total_estimated'|'t
 
 export interface Entry {id:string;user_id:string;date:string;task_id:string;kind:string;role:string;hours:number;note:string;created_at:string;updated_at:string}
 export interface Overview {users:Engineer[];tasks:Task[];entries:Entry[];taskActuals:Record<string,{ex:number;qc:number}>;start:string;end:string;role:'admin'|'member'}
-export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:Task[];entries:Entry[];errors:string[];warnings:string[]}
+export interface ImportPreview {mode:'tasks'|'effort'|'workbook';rows:number;tasks:Task[];entries:Entry[];errors:string[];warnings:string[];engineers?:string[]}
 export const KINDS=['Task','Meeting/Training','Public Holiday','Full-day Leave','Half-day Leave - 1st','Half-day Leave - 2nd','Other'] as const;
 export const STATUSES=['Not started','In progress','Sent to QC','Completed','On hold','Cancelled'] as const;
 export async function api<T>(path:string,init:RequestInit={}):Promise<T>{
