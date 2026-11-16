@@ -33,6 +33,47 @@ const existingTaskColumns=new Set((central.pragma('table_info(tasks)') as Array<
 for(const [name,definition] of Object.entries(EXTRA_TASK_COLUMNS)) {
   if(!existingTaskColumns.has(name))central.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`);
 }
+
+central.exec(`
+ CREATE TABLE IF NOT EXISTS effort_rates(
+   id TEXT PRIMARY KEY,activity TEXT NOT NULL,difficulty TEXT NOT NULL,activity_code TEXT NOT NULL UNIQUE,
+   execution_hours REAL NOT NULL CHECK(execution_hours>=0),qc_hours REAL NOT NULL CHECK(qc_hours>=0),
+   criteria TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+ );
+ CREATE TABLE IF NOT EXISTS task_estimates(
+   id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+   rate_id TEXT NOT NULL REFERENCES effort_rates(id),quantity INTEGER NOT NULL CHECK(quantity>0),
+   experience TEXT NOT NULL CHECK(experience IN ('Beginner','Intermediate','Expert')),
+   factor REAL NOT NULL CHECK(factor>0),ex_hours REAL NOT NULL,qc_hours REAL NOT NULL,
+   created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+ );
+ CREATE INDEX IF NOT EXISTS idx_task_estimates_task ON task_estimates(task_id);
+ CREATE TABLE IF NOT EXISTS tracking_marks(
+   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+   scope TEXT NOT NULL CHECK(scope IN ('cell','row','column')),
+   task_id TEXT NOT NULL DEFAULT '',column_key TEXT NOT NULL DEFAULT '',
+   fill_color TEXT NOT NULL DEFAULT '',text_color TEXT NOT NULL DEFAULT '',
+   pinned INTEGER NOT NULL DEFAULT 0,
+   PRIMARY KEY(user_id,scope,task_id,column_key)
+ );
+`);
+export interface EffortRate {id:string;activity:string;difficulty:string;activity_code:string;execution_hours:number;qc_hours:number;criteria:string;updated_at:string}
+export interface TaskEstimate {id:string;task_id:string;rate_id:string;quantity:number;experience:string;factor:number;ex_hours:number;qc_hours:number;created_by:string;created_at:string}
+export interface TrackingMark {user_id:string;scope:'cell'|'row'|'column';task_id:string;column_key:string;fill_color:string;text_color:string;pinned:number}
+export const EXPERIENCE_FACTORS={Beginner:1,Intermediate:0.9,Expert:0.8} as const;
+export function listEffortRates():EffortRate[]{return central.prepare('SELECT * FROM effort_rates ORDER BY activity,difficulty').all() as EffortRate[];}
+export function listTaskEstimates():TaskEstimate[]{return central.prepare('SELECT * FROM task_estimates ORDER BY created_at DESC,id DESC').all() as TaskEstimate[];}
+export function addTaskEstimate(input:{task_id:string;rate_id:string;quantity:number;experience:keyof typeof EXPERIENCE_FACTORS;created_by:string}):TaskEstimate{
+ const rate=central.prepare('SELECT * FROM effort_rates WHERE id=?').get(input.rate_id) as EffortRate|undefined;
+ if(!rate)throw new Error('Unknown estimation reference');
+ if(!central.prepare('SELECT id FROM tasks WHERE id=?').get(input.task_id))throw new Error('Unknown Task ID');
+ const factor=EXPERIENCE_FACTORS[input.experience],id=randomUUID();
+ const rounded=(n:number)=>Math.round((n+Number.EPSILON)*10)/10;
+ central.prepare('INSERT INTO task_estimates(id,task_id,rate_id,quantity,experience,factor,ex_hours,qc_hours,created_by) VALUES(?,?,?,?,?,?,?,?,?)').run(
+   id,input.task_id,input.rate_id,input.quantity,input.experience,factor,rounded(rate.execution_hours*factor*input.quantity),rounded(rate.qc_hours*factor*input.quantity),input.created_by);
+ return central.prepare('SELECT * FROM task_estimates WHERE id=?').get(id) as TaskEstimate;
+}
+export function listTrackingMarks(userId:string):TrackingMark[]{return central.prepare('SELECT * FROM tracking_marks WHERE user_id=?').all(userId) as TrackingMark[];}
 const opened=new Map<string,Database.Database>();
 export function userDb(userId:string):Database.Database {
   const id=safeSlug(userId);if(id!==userId)throw new Error('Invalid user identifier');

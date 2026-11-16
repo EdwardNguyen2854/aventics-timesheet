@@ -9,6 +9,8 @@ import {z,ZodError} from 'zod';
 import {ENTRY_KINDS,ROLES,TASK_STATUSES,monthBounds,validHours,validIsoDate} from './domain.js';
 import {bootstrap,central,createUser,newSession,hashToken,userForSession,listTasks,listUsers,listEntries,allEntries,userDb,aggregateTaskActuals,taskEffortBreakdown,upsertTask,addEntry,removeEntry,replaceEffortCell,verifyPassword,DATA_ROOT,type User,type Task} from './db.js';
 import {templateWorkbook,parseWorkbook,makeExport} from './excel.js';
+import {EXPERIENCE_FACTORS,listEffortRates,listTaskEstimates,addTaskEstimate,listTrackingMarks} from './db.js';
+
 
 bootstrap();
 const app=Fastify({logger:true,bodyLimit:2_000_000,trustProxy:false});
@@ -106,6 +108,90 @@ app.get('/api/overview',async(req)=>{
   const entries=current.is_admin?allEntries(start,end):listEntries(current.id,start,end).map(e=>({...e,user_id:current.id}));
   return {users,tasks:listTasks(),entries,taskActuals:aggregateTaskActuals(users.map(u=>u.id)),start,end,role:current.is_admin?'admin':'member'};
 });
+
+/** Excel-like year and month browsing. Default is the whole calendar year. */
+app.get('/api/timesheet-range',async(req)=>{
+ const input=z.object({year:z.coerce.number().int().min(2000).max(2100),month:z.enum(['all','01','02','03','04','05','06','07','08','09','10','11','12']).default('all')}).parse(req.query);
+ const start=input.month==='all'?`${input.year}-01-01`:`${input.year}-${input.month}-01`;
+ const end=input.month==='all'?`${input.year}-12-31`:monthBounds(`${input.year}-${input.month}`).end;
+ const me=actor(req),entries=me.is_admin?allEntries(start,end):listEntries(me.id,start,end).map(e=>({...e,user_id:me.id}));
+ return {start,end,entries,year:input.year,month:input.month};
+});
+const rateSchema=z.object({
+ id:z.string().trim().min(1).max(80),activity:z.string().trim().min(1).max(120),
+ difficulty:z.string().trim().min(1).max(80),activity_code:z.string().trim().min(1).max(120),
+ execution_hours:z.number().finite().min(0).max(100000),qc_hours:z.number().finite().min(0).max(100000),
+ criteria:z.string().max(4000).default('')
+});
+app.get('/api/effort-lookup',async()=>({rates:listEffortRates(),factors:EXPERIENCE_FACTORS}));
+app.post('/api/effort-lookup/import',async(req)=>{
+ guardAdmin(req);
+ const file=await req.file();if(!file||!file.filename.toLowerCase().endsWith('.json'))throw httpError('Upload a JSON reference file');
+ const bytes=await file.toBuffer();let parsed:unknown;
+ try{parsed=JSON.parse(bytes.toString('utf8'));}catch{throw httpError('Invalid JSON');}
+ const input=z.object({version:z.number().optional(),rates:z.array(rateSchema).min(1).max(2000)}).parse(parsed);
+ const ids=new Set<string>(),codes=new Set<string>();
+ for(const rate of input.rates){if(ids.has(rate.id)||codes.has(rate.activity_code))throw httpError('Duplicate rate identifier or activity code in file');ids.add(rate.id);codes.add(rate.activity_code);}
+ central.transaction(()=>{
+  const stmt=central.prepare(`INSERT INTO effort_rates(id,activity,difficulty,activity_code,execution_hours,qc_hours,criteria)
+   VALUES(@id,@activity,@difficulty,@activity_code,@execution_hours,@qc_hours,@criteria)
+   ON CONFLICT(id) DO UPDATE SET activity=excluded.activity,difficulty=excluded.difficulty,
+   activity_code=excluded.activity_code,execution_hours=excluded.execution_hours,qc_hours=excluded.qc_hours,
+   criteria=excluded.criteria,updated_at=CURRENT_TIMESTAMP`);
+  for(const rate of input.rates)stmt.run(rate);
+ })();
+ return {ok:true,imported:input.rates.length};
+});
+app.post('/api/effort-lookup',async(req)=>{
+ guardAdmin(req);const rate=rateSchema.parse(req.body);
+ central.prepare(`INSERT INTO effort_rates(id,activity,difficulty,activity_code,execution_hours,qc_hours,criteria)
+ VALUES(@id,@activity,@difficulty,@activity_code,@execution_hours,@qc_hours,@criteria)
+ ON CONFLICT(id) DO UPDATE SET activity=excluded.activity,difficulty=excluded.difficulty,
+ activity_code=excluded.activity_code,execution_hours=excluded.execution_hours,qc_hours=excluded.qc_hours,
+ criteria=excluded.criteria,updated_at=CURRENT_TIMESTAMP`).run(rate);return {ok:true};
+});
+app.get('/api/task-estimates',async()=>listTaskEstimates());
+app.post('/api/task-estimates',async(req)=>{
+ guardAdmin(req);const input=z.object({task_id:z.string().min(1),rate_id:z.string().min(1),
+ quantity:z.number().int().min(1).max(100000),experience:z.enum(['Beginner','Intermediate','Expert'])}).parse(req.body);
+ return addTaskEstimate({...input,created_by:actor(req).id});
+});
+app.delete('/api/task-estimates/:id',async(req)=>{
+ guardAdmin(req);const id=(req.params as {id:string}).id;
+ const changed=central.prepare('DELETE FROM task_estimates WHERE id=?').run(id).changes;
+ if(!changed)throw httpError('Estimate not found',404);return {ok:true};
+});
+app.post('/api/task-estimates/apply',async(req)=>{
+ guardAdmin(req);const {task_id}=z.object({task_id:z.string().min(1)}).parse(req.body);
+ const totals=central.prepare('SELECT COUNT(*) n,SUM(ex_hours) ex,SUM(qc_hours) qc FROM task_estimates WHERE task_id=?').get(task_id) as {n:number;ex:number|null;qc:number|null};
+ if(!totals.n)throw httpError('No estimate items for this Task ID');
+ const changed=central.prepare('UPDATE tasks SET estimated_ex=?,estimated_qc=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(totals.ex||0,totals.qc||0,task_id);
+ if(!changed.changes)throw httpError('Task not found',404);
+ return {ok:true,estimated_ex:totals.ex,estimated_qc:totals.qc};
+});
+const markSchema=z.object({scope:z.enum(['cell','row','column']),task_id:z.string().max(200).default(''),column_key:z.string().max(100).default(''),
+ fill_color:z.enum(['','#e7f2f1','#fff4d6','#e5f3f8','#fde8e9']).default(''),
+ text_color:z.enum(['','#0e625e','#865600','#004975','#ac2027']).default(''),pinned:z.boolean().default(false)});
+app.get('/api/tracking-marks',async(req)=>listTrackingMarks(actor(req).id));
+app.post('/api/tracking-marks',async(req)=>{
+ const mark=markSchema.parse(req.body);
+ if((mark.scope==='row'&&!mark.task_id)||(mark.scope==='column'&&!mark.column_key)||(mark.scope==='cell'&&(!mark.task_id||!mark.column_key)))
+  throw httpError('Specify a target row, column, or cell');
+ const {TASK_WRITABLE_COLUMNS}=await import('./task-fields.js');
+ if(mark.column_key&&!TASK_WRITABLE_COLUMNS.some(x=>x===mark.column_key)&&!['total_estimated','total_actual'].includes(mark.column_key))
+  throw httpError('Invalid target column');
+ if(mark.task_id&&!central.prepare('SELECT id FROM tasks WHERE id=?').get(mark.task_id))throw httpError('Unknown Task ID');
+ central.prepare(`INSERT INTO tracking_marks(user_id,scope,task_id,column_key,fill_color,text_color,pinned) VALUES(?,?,?,?,?,?,?)
+ ON CONFLICT(user_id,scope,task_id,column_key) DO UPDATE SET fill_color=excluded.fill_color,text_color=excluded.text_color,pinned=excluded.pinned`).run(
+ actor(req).id,mark.scope,mark.task_id,mark.column_key,mark.fill_color,mark.text_color,mark.pinned?1:0);
+ return {ok:true};
+});
+app.delete('/api/tracking-marks',async(req)=>{
+ const mark=z.object({scope:z.enum(['cell','row','column']),task_id:z.string().default(''),column_key:z.string().default('')}).parse(req.body);
+ central.prepare('DELETE FROM tracking_marks WHERE user_id=? AND scope=? AND task_id=? AND column_key=?').run(actor(req).id,mark.scope,mark.task_id,mark.column_key);
+ return {ok:true};
+});
+
 app.get('/api/entries',async(req)=>{
   const input=z.object({userId:z.string(),month:z.string()}).parse(req.query);canReadUser(req,input.userId);
   const {start,end}=monthBounds(input.month);return listEntries(input.userId,start,end);
