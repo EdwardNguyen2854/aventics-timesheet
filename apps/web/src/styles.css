@@ -111,3 +111,23 @@
 .work-estimation h3{font-size:13px;margin:22px 0 8px}
 @media(max-width:1120px){.estimation-controls{grid-template-columns:repeat(2,minmax(180px,1fr))}.estimate-result{grid-template-columns:repeat(3,minmax(130px,1fr))}}
 @media(max-width:720px){.estimation-controls,.estimate-result,.lookup-new-rate{grid-template-columns:1fr}}
+
+/* Year-long effort sheet. Blank cells remain neutral; only logged effort is green. */
+.timesheet-scroll{overflow:auto;max-height:72vh;overscroll-behavior:contain;scrollbar-color:#8ea79a #eff1f0;scrollbar-gutter:stable}
+.timesheet-scroll::-webkit-scrollbar{width:13px;height:15px}
+.timesheet-scroll::-webkit-scrollbar-thumb{background:#8ea79a;border:3px solid #eff1f0}
+.timegrid thead .logged-day{background:#d7efdf;color:#155b36}
+.timegrid thead .date-head.first-of-month{border-left:3px solid #007bc0}
+.timegrid thead .date-head small{display:block;font-size:8px;line-height:10px}
+.timegrid thead .date-head.first-of-month{height:41px}
+.excel-grid .day-cell:not(.has-effort) .excel-cell{background:transparent;color:#abb2b2}
+.excel-grid .day-cell:not(.has-effort) .excel-cell:hover{background:#edf3f6;color:var(--av-ink)}
+.excel-grid .day-cell.has-effort .excel-cell{background:inherit;color:inherit;font-weight:750}
+.excel-grid .day-cell.heat-1,.excel-grid .excel-cell.heat-1,.heat-legend.heat-1{background:#edf8f0;color:#225f3c}
+.excel-grid .day-cell.heat-2,.excel-grid .excel-cell.heat-2,.heat-legend.heat-2{background:#d0ebd7;color:#195b35}
+.excel-grid .day-cell.heat-3,.excel-grid .excel-cell.heat-3,.heat-legend.heat-3{background:#a8daba;color:#155830}
+.excel-grid .day-cell.heat-4,.excel-grid .excel-cell.heat-4,.heat-legend.heat-4{background:#75c692;color:#124c2b}
+.excel-grid .day-cell.heat-5,.excel-grid .excel-cell.heat-5,.heat-legend.heat-5{background:#2f9b5d;color:#fff}
+.timegrid .day-total-row .day-cell:not(.has-effort){background:#f4f5f6}
+.timegrid .day-total-row .day-cell.has-effort .day-total{color:inherit}
+.heat-legend{display:inline-flex;align-items:center;padding:3px 8px;border:1px solid #bed8c5;min-height:24px;font-size:10px}

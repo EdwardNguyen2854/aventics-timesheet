@@ -105,16 +105,26 @@ function EntryEditor({overview,selectedUser,initialDate,onSaved,onClose}:{overvi
  <div className="modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy?'Saving…':'Save effort'}</button></div></form></section></div>;
 }
 interface GridRow {key:string;userId:string;status:string;taskId:string;kind:string;role:string;entries:Entry[]}
-function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overview:Overview;selectedUser:string;onUser:(id:string)=>void;month:string;refresh:()=>void;flash:(s:string)=>void}){
- const days=useMemo(()=>daysOfMonth(month),[month]);
+function TimesheetPage({overview,selectedUser,onUser,refresh,flash}:{overview:Overview;selectedUser:string;onUser:(id:string)=>void;refresh:()=>void;flash:(s:string)=>void}){
+ const [year,setYear]=useState(new Date().getFullYear()),[period,setPeriod]=useState('all');
+ const [yearEntries,setYearEntries]=useState<Entry[]>([]),[rangeBusy,setRangeBusy]=useState(false),[rangeError,setRangeError]=useState('');
+ const days=useMemo(()=>period==='all'?daysOfYear(year):daysOfMonth(String(year)+'-'+period),[year,period]);
+ useEffect(()=>{let active=true;setRangeBusy(true);
+   api<{entries:Entry[]}>('/timesheet-range?year='+year+'&month='+period).then(r=>{if(active){setYearEntries(r.entries);setRangeError('');}})
+   .catch(e=>{if(active)setRangeError((e as Error).message);})
+   .finally(()=>{if(active)setRangeBusy(false);});
+   return()=>{active=false;};},[year,period,overview.entries]);
  const users=overview.users,allView=selectedUser==='all',isAdmin=overview.role==='admin';
- const entries=useMemo(()=>overview.entries.filter(e=>allView||e.user_id===selectedUser),[overview.entries,allView,selectedUser]);
+ const entries=useMemo(()=>yearEntries.filter(e=>allView||e.user_id===selectedUser),[yearEntries,allView,selectedUser]);
+ const cells=useMemo(()=>{const map=new Map<string,Entry[]>();for(const e of entries){const key=JSON.stringify([e.user_id,e.kind,e.task_id,e.role,e.date]);const arr=map.get(key)||[];arr.push(e);map.set(key,arr);}return map;},[entries]);
+ const daily=useMemo(()=>{const map=new Map<string,number>();for(const e of entries)map.set(e.date,(map.get(e.date)||0)+e.hours);return map;},[entries]);
+ const heat=(h:number)=>h<=0?0:h<=2?1:h<=4?2:h<=6?3:h<=8?4:5;
  const [editMode,setEditMode]=useState(false),[active,setActive]=useState<{key:string;date:string;draft:string}|null>(null);
  const [entryModal,setEntryModal]=useState<{userId:string;date:string}|null>(null),[details,setDetails]=useState<{entries:Entry[];userId:string}|null>(null);
  const [search,setSearch]=useState(''),[err,setErr]=useState('');
  const [extraRows,setExtraRows]=useState<GridRow[]>([]),[newTask,setNewTask]=useState(''),[newKind,setNewKind]=useState('Task'),[newRole,setNewRole]=useState('EX'),[newPerson,setNewPerson]=useState('');
  const saving=useRef(new Set<string>());
- useEffect(()=>{setActive(null);setExtraRows([]);},[month,selectedUser]);
+ useEffect(()=>{setActive(null);setExtraRows([]);},[year,period,selectedUser]);
  const taskMap=useMemo(()=>new Map(overview.tasks.map(t=>[t.id,t])),[overview.tasks]);
  const userMap=useMemo(()=>new Map(users.map(u=>[u.id,u])),[users]);
  const makeKey=(userId:string,kind:string,taskId:string,role:string)=>JSON.stringify([userId,kind,taskId,role]);
@@ -130,9 +140,9 @@ function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overv
      .sort((a,b)=>a.userId.localeCompare(b.userId)||a.taskId.localeCompare(b.taskId)||a.kind.localeCompare(b.kind)||a.role.localeCompare(b.role));
  },[entries,extraRows,allView,selectedUser,taskMap,search]);
  const rowIndex=new Map(rows.map((row,i)=>[row.key,i]));
- const entriesFor=(row:GridRow,date:string)=>row.entries.filter(e=>e.date===date);
+ const entriesFor=(row:GridRow,date:string)=>cells.get(JSON.stringify([row.userId,row.kind,row.taskId,row.role,date]))||[];
  const valueFor=(row:GridRow,date:string)=>sum(entriesFor(row,date));
- const dayTotal=(date:string)=>sum(entries,e=>e.date===date);
+ const dayTotal=(date:string)=>daily.get(date)||0;
  function addRow(){const userId=allView?(newPerson||users[0]?.id||''):selectedUser;
    if(!userId){setErr('Select an engineer first.');return;}
    if(newKind==='Task'&&!newTask){setErr('Choose a task before adding the row.');return;}
@@ -140,7 +150,7 @@ function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overv
    const row:GridRow={key:makeKey(userId,newKind,taskId,role),userId,status:newKind,taskId,kind:newKind,role,entries:[]};
    if(!rows.some(r=>r.key===row.key))setExtraRows(old=>[...old,row]);
    setSearch('');setErr('');
-   setActive({key:row.key,date:days[0]||`${month}-01`,draft:''});
+   setActive({key:row.key,date:days[0]||String(year)+'-01-01',draft:''});
  }
  async function commitCell(cell:{key:string;date:string;draft:string},next?:{key:string;date:string}){
    const id=cell.key+'@'+cell.date;if(saving.current.has(id))return;
@@ -187,14 +197,17 @@ function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overv
  }
  return <>
  <div className="toolbar panel-toolbar"><div className="toolbar-left">
-   <select className="input short" aria-label="Engineer view" value={selectedUser} onChange={e=>onUser(e.target.value)}>
+   <select className="input short" aria-label="Timesheet year" value={year} onChange={e=>setYear(Number(e.target.value))}>{Array.from({length:7},(_,i)=>new Date().getFullYear()-5+i).map(y=><option key={y} value={y}>{y}</option>)}</select>
+ <select className="input short" aria-label="Timesheet period" value={period} onChange={e=>setPeriod(e.target.value)}><option value="all">All months</option>{Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')).map(m=><option key={m} value={m}>{new Date(2026,Number(m)-1,1).toLocaleDateString('en',{month:'long'})}</option>)}</select>
+ <select className="input short" aria-label="Engineer view" value={selectedUser} onChange={e=>onUser(e.target.value)}>
      {isAdmin&&<option value="all">All engineers</option>}{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
    </select><div className="search-wrap"><Search size={15}/><input aria-label="Filter timesheet" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Filter engineer / task / status"/></div>
- </div><div className="toolbar-right"><span className="subtle">{rows.length} rows · {allView?'Team':userMap.get(selectedUser)?.name||selectedUser}</span>
+ </div><div className="toolbar-right"><span className="subtle">{rows.length} rows · {allView?'Team':userMap.get(selectedUser)?.name||selectedUser}{rangeBusy?' · Loading…':''}</span>
    <button className={`btn ${editMode?'primary':''}`} aria-pressed={editMode} onClick={()=>{setEditMode(v=>!v);setActive(null);}}>{editMode?'Exit edit mode':'Edit like Excel'}</button>
-   <button className="btn primary" onClick={()=>setEntryModal({userId:allView?users[0]?.id||'':selectedUser,date:today().startsWith(month)?today():days[0]||`${month}-01`})}><Plus size={14}/>Log effort</button>
+   <button className="btn primary" onClick={()=>setEntryModal({userId:allView?users[0]?.id||'':selectedUser,date:days.includes(today())?today():days[0]||String(year)+'-01-01'})}><Plus size={14}/>Log effort</button>
  </div></div>
- {err&&<div className="error-msg" role="alert">{err} <button className="icon-btn" aria-label="Dismiss" onClick={()=>setErr('')}><X size={13}/></button></div>}
+ {rangeError&&<div className="error-msg" role="alert">{rangeError}</div>}
+  {err&&<div className="error-msg" role="alert">{err} <button className="icon-btn" aria-label="Dismiss" onClick={()=>setErr('')}><X size={13}/></button></div>}
  {editMode&&<div className="edit-rail">
    <span><strong>EDIT MODE</strong> Click cells to type hours · Enter next row · Tab next day · paste TSV from Excel · Delete/0 clears cell</span>
    {allView&&<select aria-label="New row engineer" className="input short" value={newPerson||users[0]?.id||''} onChange={e=>setNewPerson(e.target.value)}>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>}
@@ -202,14 +215,14 @@ function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overv
    {newKind==='Task'&&<><select className="input short task-select" aria-label="New task row" value={newTask} onChange={e=>setNewTask(e.target.value)}><option value="">Choose task</option>{overview.tasks.map(t=><option key={t.id} value={t.id}>{t.id} · {t.name}</option>)}</select><select aria-label="New task role" className="input short" value={newRole} onChange={e=>setNewRole(e.target.value)}><option>EX</option><option>QC</option></select></>}
    <button className="btn small" onClick={addRow}><Plus size={13}/>Add row</button>
  </div>}
- <section className="panel"><div className="panel-header"><h2>Monthly effort grid</h2><span className="subtle">Engineer · Status · Task ID · Role · {month} · EX / QC</span></div>
- <div className="timesheet-scroll"><table className="timegrid excel-grid"><thead><tr>
+ <section className="panel"><div className="panel-header"><h2>{period==='all'?'Full-year effort grid':'Monthly effort grid'}</h2><span className="subtle">{period==='all'?'All months · '+year:year+'-'+period} · frozen task columns · scroll horizontally</span></div>
+ <div className="timesheet-scroll" tabIndex={0} aria-label="Scrollable timesheet"><table className="timegrid excel-grid"><thead><tr>
    <th className="excel-meta col-engineer" rowSpan={2}>Engineer</th><th className="excel-meta col-status" rowSpan={2}>Status</th>
    <th className="excel-meta col-task" rowSpan={2}>Task ID</th><th className="excel-meta col-role" rowSpan={2}>Role</th><th className="excel-meta col-sum" rowSpan={2}>Total</th>
-   {days.map(d=><th key={d} className={`day-head ${isWeekend(d)?'weekend':''}`}>{new Date(`${d}T00:00:00`).toLocaleDateString('en',{weekday:'short'})}</th>)}
- </tr><tr>{days.map(d=><th key={d} className={`date-head ${isWeekend(d)?'weekend':''}`} title={`${d.slice(-2)}.${d.slice(5,7)}.${d.slice(0,4)}`}>{d.slice(-2)}</th>)}</tr></thead>
+   {days.map(d=><th key={d} className={`day-head ${isWeekend(d)?'weekend':''} ${dayTotal(d)>0?'logged-day':''}`}>{new Date(d+'T00:00:00').toLocaleDateString('en',{weekday:'short'})}</th>)}
+ </tr><tr>{days.map(d=><th key={d} className={`date-head ${isWeekend(d)?'weekend':''} ${dayTotal(d)>0?'logged-day':''} ${d.endsWith('-01')?'first-of-month':''}`} title={d.slice(8)+'.'+d.slice(5,7)+'.'+d.slice(0,4)}>{d.slice(-2)}{d.endsWith('-01')&&<small>{new Date(d+'T00:00:00').toLocaleDateString('en',{month:'short'})}</small>}</th>)}</tr></thead>
  <tbody><tr className="day-total-row"><td className="excel-meta col-engineer">TOTAL</td><td className="excel-meta col-status"/><td className="excel-meta col-task"/><td className="excel-meta col-role"/><td className="excel-meta col-sum num">{fmtHours(sum(entries))}</td>
-   {days.map(d=><td key={d} className={`day-cell ${isWeekend(d)?'weekend':''}`}><span className="day-total">{dayTotal(d)?fmtHours(dayTotal(d)):'·'}</span></td>)}
+   {days.map(d=><td key={d} className={`day-cell ${dayTotal(d)>0?'has-effort heat-'+heat(dayTotal(d)):isWeekend(d)?'weekend':''}`}><span className="day-total">{dayTotal(d)?fmtHours(dayTotal(d)):'·'}</span></td>)}
  </tr>
  {rows.map(row=><tr key={row.key}>
    <td className="excel-meta col-engineer"><strong>{userMap.get(row.userId)?.name||row.userId}</strong></td>
@@ -217,11 +230,11 @@ function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overv
    <td className="excel-meta col-task mono" title={row.taskId||row.kind}>{row.taskId||row.kind}</td>
    <td className="excel-meta col-role">{row.role}</td><td className="excel-meta col-sum num strong">{fmtHours(sum(row.entries))}</td>
    {days.map(date=>{const records=entriesFor(row,date),value=sum(records),isActive=active?.key===row.key&&active.date===date;
-     return <td className={`day-cell ${isWeekend(date)?'weekend':''} ${editMode?'editable-day':''}`} key={date}>
+     return <td className={`day-cell ${value>0?'has-effort heat-'+heat(value):isWeekend(date)?'weekend':''} ${editMode?'editable-day':''}`} key={date}>
        {isActive?<input autoFocus aria-label={`Edit ${row.userId} ${row.taskId||row.kind} ${date}`} className="excel-input" inputMode="decimal" value={active!.draft}
          onFocus={e=>e.target.select()} onChange={e=>setActive(v=>v?{...v,draft:e.target.value}:v)}
          onBlur={()=>void commitCell(active!)} onKeyDown={event=>move(active!,event)} onPaste={e=>void pasteCells(e,active!)}/>
-       :<button className={`excel-cell ${row.role==='QC'?'qc':row.kind==='Task'?'ex':'absence'} ${records.length>1?'multi-note':''}`}
+       :<button className={`excel-cell ${value>0?'has-effort heat-'+heat(value):''} ${records.length>1?'multi-note':''}`}
          title={records.length>1?'Multiple notes: view details to edit':`${row.userId} · ${date} · ${fmtHours(value)}h`}
          onClick={()=>editMode?(records.length>1?setErr('Multiple records in this cell. Exit edit mode and view details.'):setActive({key:row.key,date,draft:value?fmtHours(value):''})):
            (records.length?setDetails({entries:records,userId:row.userId}):setEntryModal({userId:row.userId,date}))}>
@@ -232,7 +245,7 @@ function TimesheetPage({overview,selectedUser,onUser,month,refresh,flash}:{overv
  </tr>)}
  {!rows.length&&<tr><td className="empty" colSpan={days.length+5}>No entries yet. {editMode?'Choose a task and Add row.':'Select Log effort or import a workbook.'}</td></tr>}
  </tbody></table></div>
- <div className="table-footer"><span><i className="swatch blue"/>EX effort</span><span><i className="swatch teal"/>QC effort</span><span><i className="swatch gray"/>Other / leave</span>{editMode&&<span>Each change is saved to the server; cells with multiple notes are protected.</span>}</div>
+ <div className="table-footer"><span>Logged hours:</span><span className="heat-legend heat-1">0.25–2h</span><span className="heat-legend heat-2">2–4h</span><span className="heat-legend heat-3">4–6h</span><span className="heat-legend heat-4">6–8h</span><span className="heat-legend heat-5">8h+</span>{editMode&&<span>Each change is saved to the server; cells with multiple notes are protected.</span>}</div>
  </section>
  {details&&<div className="modal-backdrop" onClick={()=>setDetails(null)}><section className="modal" role="dialog" aria-modal="true" onClick={e=>e.stopPropagation()}><div className="panel-header"><h2>Logged records · {details.entries[0]?.date}</h2><button className="icon-btn" aria-label="Close" onClick={()=>setDetails(null)}><X size={15}/></button></div><div className="panel-body">{details.entries.map(e=><div key={e.id} className="entry-detail"><div><strong>{fmtHours(e.hours)} h · {e.role==='NA'?e.kind:e.role}</strong><small>{e.note||e.task_id||'No note'}</small></div><button className="btn small" onClick={()=>void removeEntry(e,details.userId)}><Trash2 size={13}/>Delete</button></div>)}<div className="modal-actions"><button className="btn" onClick={()=>setDetails(null)}>Close</button><button className="btn primary" onClick={()=>{setEntryModal({date:details.entries[0]?.date||today(),userId:details.userId});setDetails(null);}}>Add entry</button></div></div></section></div>}
  {entryModal&&<EntryEditor overview={overview} selectedUser={entryModal.userId} initialDate={entryModal.date} onClose={()=>setEntryModal(null)} onSaved={()=>{setEntryModal(null);refresh();flash('Effort saved');}}/>}
@@ -575,11 +588,11 @@ export default function App(){
  return <div className={`app-shell ${sidebarCollapsed?'sidebar-collapsed':''}`}><Supergraphic revision={brandRevision}/>
  <header className="topbar"><div className="brand"><div className="brand-slot"><img src="/bosch-logo.svg" alt="Bosch"/></div><div className="brand-copy"><span className="brand-kicker">AVENTICS SUITE</span><strong className="brand-product">Work Desk</strong></div></div><div className="header-context"><span className={error?"offline-dot":"online-dot"}/><span>{error?"Connection problem":"Connected"}</span></div><div className="account"><div className="user-circle">{currentUser.name.slice(0,2).toUpperCase()}</div><div><strong>{currentUser.name}</strong><small>{currentUser.is_admin?'Administrator':'Engineer'}</small></div><button className="icon-btn" onClick={()=>void logout()} title="Sign out" aria-label="Sign out"><LogOut size={17}/></button></div></header>
  <aside className="sidebar" aria-label="Workspace navigation"><div className="sidebar-heading"><div className="sidebar-label">WORKSPACE</div><button type="button" className="sidebar-toggle" onClick={()=>setSidebarCollapsed(v=>!v)} title={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-label={sidebarCollapsed?'Expand sidebar':'Collapse sidebar'} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed?<PanelLeftOpen size={18}/>:<PanelLeftClose size={18}/>}</button></div><nav aria-label="Workspace pages">{pages.map(([key,label,Icon])=><button key={key} className={page===key?'active':''} title={sidebarCollapsed?label:undefined} aria-label={label} aria-current={page===key?'page':undefined} onClick={()=>setPage(key)}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="server-tile"><Database size={17}/><div><strong>Server-managed storage</strong><span>SQLite · Per engineer</span></div></div><span>AVENTICS WORK DESK</span><small>v0.3.0 · Web</small></div></aside>
- <main className="main"><div className="page-header"><div><div className="crumb">WORKSPACE <ChevronRight size={12}/> {meta[page][0].toUpperCase()}</div><h1>{meta[page][0]}</h1><p>{meta[page][1]}</p></div><div className="page-actions"><div className="month-picker"><button aria-label="Previous month" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button><input type="month" value={month} onChange={e=>setMonth(e.target.value)}/><button aria-label="Next month" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button></div><button className="btn small" onClick={()=>void refresh()} title="Refresh"><RefreshCw size={14}/>{loading?'Loading…':'Refresh'}</button></div></div>
+ <main className="main"><div className="page-header"><div><div className="crumb">WORKSPACE <ChevronRight size={12}/> {meta[page][0].toUpperCase()}</div><h1>{meta[page][0]}</h1><p>{meta[page][1]}</p></div><div className="page-actions">{page!=='timesheet'&&<div className="month-picker"><button aria-label="Previous month" onClick={()=>moveMonth(-1)}><ChevronLeft size={15}/></button><input type="month" value={month} onChange={e=>setMonth(e.target.value)}/><button aria-label="Next month" onClick={()=>moveMonth(1)}><ChevronRight size={15}/></button></div>}<button className="btn small" onClick={()=>void refresh()} title="Refresh"><RefreshCw size={14}/>{loading?'Loading…':'Refresh'}</button></div></div>
  {notice&&<Notice message={notice} onClose={()=>setNotice('')}/>} {error&&<div className="error-msg">{error}</div>}
  {!overview?<div className="empty large">{loading?'Loading team data…':'No data available.'}</div>:<>
  {page==='overview'&&<OverviewPage overview={overview} month={month} onGo={setPage}/>}
- {page==='timesheet'&&<TimesheetPage overview={overview} selectedUser={selectedUser} onUser={setSelectedUser} month={month} refresh={()=>void refresh()} flash={flash}/>}
+ {page==='timesheet'&&<TimesheetPage overview={overview} selectedUser={selectedUser} onUser={setSelectedUser} refresh={()=>void refresh()} flash={flash}/>}
  {page==='tasks'&&<TasksPage overview={overview} onRefresh={()=>void refresh()} flash={flash} month={month}/>}
   {page==='estimation'&&<EstimationPage overview={overview} onRefresh={()=>void refresh()} flash={flash}/>}
  {page==='team'&&<TeamPage overview={overview} month={month}/>}
