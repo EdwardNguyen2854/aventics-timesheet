@@ -58,6 +58,14 @@ app.post('/api/users',async(req)=>{
   const input=z.object({id:z.string().min(2),name:z.string().min(1).max(100),password:z.string().min(12),is_admin:z.boolean().default(false)}).parse(req.body);
   return createUser(input);
 });
+app.post('/api/users/:id/activate',async(req)=>{
+ guardAdmin(req);const {id}=req.params as {id:string};
+ const {active}=z.object({active:z.boolean()}).parse(req.body);
+ const result=central.prepare('UPDATE users SET active=? WHERE id=?').run(active?1:0,id);
+ if(!result.changes)throw httpError('Engineer not found',404);
+ if(!active)central.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+ return {ok:true};
+});
 app.post('/api/users/:id/password',async(req)=>{
   guardAdmin(req);const {id}=req.params as {id:string};const body=z.object({password:z.string().min(12)}).parse(req.body);
   const {passwordHash}=await import('./db.js');
@@ -289,14 +297,14 @@ app.get('/api/export',async(req,reply)=>{
   reply.header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   reply.header('Content-Disposition',`attachment; filename="${file}"`);return reply.send(Buffer.from(buffer));
 });
-async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'){
-  if(mode==='tasks')guardAdmin(req);
+async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'|'workbook',provisionUsers=false){
+  if(mode!=='effort')guardAdmin(req);
   const file=await req.file();if(!file)throw httpError('Choose an .xlsx file');
   if(!file.filename.toLowerCase().endsWith('.xlsx'))throw httpError('Only .xlsx workbooks are supported');
   const bytes=await file.toBuffer();
   if(bytes.length<4 || bytes[0]!==0x50||bytes[1]!==0x4b)throw httpError('Invalid XLSX file');
   const preview=await parseWorkbook(bytes,mode,actor(req).id,!!actor(req).is_admin);
-  if(mode==='tasks'){
+  if(mode!=='effort'){
     const old=new Map(listTasks().map(t=>[t.id,t]));
     const present=new Set(preview.present_task_fields||[]);
     const logged=aggregateTaskActuals(listUsers().map(u=>u.id));
@@ -319,32 +327,55 @@ async function receiveWorkbook(req:FastifyRequest,mode:'tasks'|'effort'){
       }
     }
   }
-  if(mode==='effort'){
-    const known=new Set(listTasks().map(t=>t.id));const users=new Set(listUsers().filter(u=>u.active).map(u=>u.id));
-    for(const e of preview.entries){
-      if(e.kind==='Task'&&!known.has(e.task_id))preview.errors.push(`Unknown Task ID: ${e.task_id}`);
-      if(!users.has(e.user_id))preview.errors.push(`Unknown engineer: ${e.user_id}`);
-      if(preview.mode==='effort'&&e.note===''){
-        if(!users.has(e.user_id))continue;
-        const db=userDb(e.user_id);
-        const existing=db.prepare('SELECT COUNT(*) n FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note != ?').get(e.date,e.task_id,e.kind,e.role,'') as {n:number};
-        if(existing.n)preview.errors.push(`${e.user_id} / ${e.date} / ${e.task_id||e.kind}: existing entries have notes; grid import cannot replace them`);
+  if(mode!=='tasks'){
+
+    const sourceIds=[...listTasks().map(x=>x.id),...preview.tasks.map(x=>x.id)];
+    const direct=new Map(sourceIds.map(id=>[id.toLowerCase(),id]));
+    const alias=new Map<string,Set<string>>();
+    for(const id of sourceIds){const short=id.toLowerCase().match(/^\\d+-ip\\d+/)?.[0];
+      if(short){const entries=alias.get(short)||new Set<string>();entries.add(id);alias.set(short,entries);}
+    }
+    const users=new Set(listUsers().map(u=>u.id));
+    const missing=new Set<string>();let normalized=0;
+    for(const entry of preview.entries){
+      if(entry.kind==='Task'){
+        const raw=entry.task_id.trim(),prefix=raw.toLowerCase().match(/^\\d+-ip\\d+/)?.[0];
+        const matches=prefix?alias.get(prefix):undefined;
+        const id=direct.get(raw.toLowerCase())||(matches?.size===1?[...matches][0]:undefined);
+        if(!id)preview.errors.push('Unknown or ambiguous Task ID: '+raw);
+        else {if(id!==entry.task_id)normalized++;entry.task_id=id;}
       }
+      if(!users.has(entry.user_id))missing.add(entry.user_id);
+      if(!users.has(entry.user_id)||entry.note!=='')continue;
+      const db=userDb(entry.user_id);
+      const existing=db.prepare("SELECT COUNT(*) n FROM entries WHERE date=? AND task_id=? AND kind=? AND role=? AND note != ''").get(entry.date,entry.task_id,entry.kind,entry.role) as {n:number};
+      if(existing.n)preview.errors.push(entry.user_id+' / '+entry.date+' / '+entry.task_id+': existing notes require detail editing');
+    }
+    if(normalized)preview.warnings.push(normalized+' dated effort entries matched using a unique serial/project Task ID prefix.');
+    if(missing.size){
+      const message='Missing engineer accounts: '+[...missing].sort().join(', ');
+      if(mode==='workbook'&&provisionUsers)preview.warnings.push(message+'. These accounts will be provisioned as INACTIVE; activate and set passwords in Administration.');
+      else preview.errors.push(message+'. Create them or select provision disabled accounts on the full workbook import.');
     }
   }
   return {preview,bytes};
 }
 app.post('/api/import/preview',async(req)=>{
-  const {mode}=z.object({mode:z.enum(['tasks','effort'])}).parse(req.query);
-  const {preview}=await receiveWorkbook(req,mode);return preview;
+  const {mode,provisionUsers}=z.object({mode:z.enum(['tasks','effort','workbook']),provisionUsers:z.enum(['0','1']).default('0')}).parse(req.query);
+  const {preview}=await receiveWorkbook(req,mode,provisionUsers==='1');return preview;
 });
 app.post('/api/import/commit',async(req)=>{
-  const {mode}=z.object({mode:z.enum(['tasks','effort'])}).parse(req.query);
-  const {preview,bytes}=await receiveWorkbook(req,mode);
+  const {mode,provisionUsers}=z.object({mode:z.enum(['tasks','effort','workbook']),provisionUsers:z.enum(['0','1']).default('0')}).parse(req.query);
+  const {preview,bytes}=await receiveWorkbook(req,mode,provisionUsers==='1');
   if(preview.errors.length||!preview.rows)throw httpError(`Import rejected: ${preview.errors.slice(0,4).join('; ') || 'No rows'}`);
-  if(mode==='tasks'){
-    central.transaction(()=>{for(const task of preview.tasks)upsertTask(task);})();
-  } else {
+  if(mode==='workbook'&&provisionUsers){
+    const existing=new Set(listUsers().map(u=>u.id));
+    for(const id of new Set(preview.entries.map(e=>e.user_id)))if(!existing.has(id)){
+      createUser({id,name:id,password:randomUUID()+randomUUID(),active:false});
+    }
+  }
+  if(mode!=='effort')central.transaction(()=>{for(const task of preview.tasks)upsertTask(task);})();
+  if(mode!=='tasks'){
     const group=new Map<string,typeof preview.entries>();
     for(const entry of preview.entries){const list=group.get(entry.user_id)||[];list.push(entry);group.set(entry.user_id,list);}
     // Each user DB commits transactionally; imports spanning multiple engineers cannot be atomic across databases.
@@ -353,9 +384,9 @@ app.post('/api/import/commit',async(req)=>{
       db.transaction(()=>{for(const {user_id,...record} of rows)addEntry(user_id,record);})();
     }
   }
-  const folder=mode==='tasks'?join(DATA_ROOT,'shared','imports'):join(DATA_ROOT,'users',actor(req).id,'imports');
+  const folder=mode==='effort'?join(DATA_ROOT,'users',actor(req).id,'imports'):join(DATA_ROOT,'shared','imports');
   mkdirSync(folder,{recursive:true});writeFileSync(join(folder,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID()}.xlsx`),bytes);
-  return {ok:true,mode,imported:mode==='tasks'?preview.tasks.length:preview.entries.length};
+  return {ok:true,mode,imported:mode==='tasks'?preview.tasks.length:mode==='effort'?preview.entries.length:preview.tasks.length+preview.entries.length};
 });
 app.setNotFoundHandler((req,reply)=>{
   if(req.url.startsWith('/api/'))return reply.code(404).send({error:'Not found'});
