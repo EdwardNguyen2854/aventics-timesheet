@@ -7,14 +7,14 @@
 5. Front with HTTPS IIS/Caddy/nginx proxy and valid internal TLS certificate. Never serve raw port 4177 to untrusted clients.
 6. Check `GET /api/health`, sign in, create a user, import sample tasks, import sample efforts, export round-trip, test a member denied access to another's records.
 7. Set restricted NTFS/Unix ACLs for data root, backups and service account; do not let web clients access SQLite directly.
-8. Schedule SQLite online backups, retention and tested restores. Keep shared catalog and all user DBs in one consistent backup generation.
+8. Schedule SQLite online backups, retention and tested restores. Back up the shared catalog and every user DB, then verify each file and record the backup manifest. The current backups are consistent **per SQLite file** but not atomic across files; quiesce writers for a coordinated production restore point and copy backups off-host.
 9. Verify server clock/time zone and workbook dates; all stored dates are ISO without TZ shifts.
-10. Complete SSO/audit/rate-limit/performance testing before wider organizational rollout.
+10. Complete SSO, authentication rate limits, audit-retention policy, a tested restore rehearsal, and large real-data performance testing before wider organizational rollout.
 
 Caddy example (requires a resolvable *internal* DNS name and TLS):
 
 ```caddyfile
-timesheet.intranet.example {
+worktrack.intranet.example {
     reverse_proxy 127.0.0.1:4177
 }
 ```
