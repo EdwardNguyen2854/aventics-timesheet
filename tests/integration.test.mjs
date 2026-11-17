@@ -47,7 +47,7 @@ test('full workbook template parses and task, estimate and effort persist separa
    operations.setSavedView('duynk','task-tracking',{density:'compact',hidden:['revision']});
    assert.equal(JSON.parse(operations.savedViews('duynk')[0].config_json).hidden[0],'revision');
    const report=operations.varianceReport('duynk',true).find(r=>r.task_id===task.id);
-   assert.equal(report.actual_ex,3);
+   assert.equal(report.actual_ex,task.actual_ex_baseline+3,'actual EX combines historical baseline and 3h dated log');
    assert.equal(report.estimated,task.estimated_ex+task.estimated_qc);
    const backup=await operations.backupAll();
    assert.equal(backup.manifest.files.length,2);
