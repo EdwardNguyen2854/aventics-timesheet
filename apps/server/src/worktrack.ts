@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import {createHash,randomUUID} from 'node:crypto';
-import {existsSync,mkdirSync,readFileSync,writeFileSync,readdirSync} from 'node:fs';
+import {createReadStream,existsSync,mkdirSync,readFileSync,writeFileSync,readdirSync,statSync} from 'node:fs';
 import {join,relative,resolve,sep} from 'node:path';
 import {central,DATA_ROOT,listTasks,listUsers,userDb,type Task,type Entry,taskEffortBreakdown,upsertTask} from './db.js';
 
@@ -123,11 +123,13 @@ export async function backupAll():Promise<{id:string;manifest:BackupManifest}>{
  for(const {path,db} of all){
   const out=join(root,path);mkdirSync(resolve(out,'..'),{recursive:true});
   await db.backup(out);
-  const bytes=readFileSync(out);
   const check=new Database(out,{readonly:true,fileMustExist:true});
   try{const integrity=check.pragma('integrity_check',{simple:true});if(integrity!=='ok')throw new Error('Backup failed integrity check: '+path);}
   finally{check.close();}
-  manifest.files.push({path,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+  // Stream the checksum: an engineer database may be too large to load into memory.
+  const digest=createHash('sha256');
+  for await (const chunk of createReadStream(out))digest.update(chunk);
+  manifest.files.push({path,bytes:statSync(out).size,sha256:digest.digest('hex')});
  }
  writeFileSync(join(root,'manifest.json'),JSON.stringify(manifest,null,2));
  return {id,manifest};

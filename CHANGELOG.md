@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 — 2026-11-17
+
+- Rebranded the application as **Aventics WorkTrack**. The GitHub repository rename remains a separate owner-admin action.
+- Introduced the two-axis virtualized full-year Timesheet with cell selection, keyboard navigation, multi-cell TSV editing and undo/redo.
+- Added the Task Workspace drawer, task history and planned-vs-actual analytics.
+- Added personal saved Task Tracking layouts and filters.
+- Added migration metadata, audited task/effort edits, optimistic task and effort concurrency checks, import job history, approved Task ID aliases and reconciliation previews.
+- Added SQLite-aware online backups with streamed SHA-256 validation; each file is backed up individually, **not atomically as a set**.
+- Added SQLite integration and Playwright browser smoke tests to CI.
+
+**Before deploying:** Back up DATA_ROOT, test migrations on a copy of your real data, verify restore procedures, and review company authentication requirements. No actual internal data is committed to GitHub.
+
 ## 0.3.0 — 2026-11-16
 
 - Renamed the product to **Aventics Work Desk** to reflect tasks, timesheets, estimation and team capacity.
@@ -11,8 +23,6 @@
 - Added data-model documentation, privacy rules and Suite manifest capability updates.
 
 **Data privacy:** User-supplied internal workbook and reference-rate data are not committed to the public source repository.
-
-# Changelog
 
 ## 0.2.1 — 2026-11-16
 
@@ -35,8 +45,6 @@
 - Preview checks for note-bearing cell collisions and preservation of existing tracking columns on legacy imports.
 
 **Validation:** pure-domain tests pass and TS/TSX syntax checked. Full npm build and browser/API integration tests still need a network-enabled environment.
-
-# Changelog
 
 ## 0.1.0 — 2026-11-16
 
