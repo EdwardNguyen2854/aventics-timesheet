@@ -35,12 +35,12 @@ app.setErrorHandler((err,req,reply)=>{
 });
 app.addHook('preHandler',async (request)=>{
   if(!request.url.startsWith('/api/')||request.url==='/api/auth/login'||request.url==='/api/health'||request.url.startsWith('/api/branding/')&&request.method==='GET')return;
-  if(!['GET','HEAD','OPTIONS'].includes(request.method)&&request.headers['x-requested-with']!=='aventics-timesheet')throw httpError('Invalid request origin',403);
+  if(!['GET','HEAD','OPTIONS'].includes(request.method)&&!['aventics-timesheet','aventics-worktrack'].includes(String(request.headers['x-requested-with']||'')))throw httpError('Invalid request origin',403);
   const user=userForSession(request.cookies.av_session);
   if(!user)throw httpError('Please sign in',401);
   (request as RequestWithActor).actor=user;
 });
-app.get('/api/health',async()=>({status:'ok',app:'aventics-work-desk',version:'0.3.0'}));
+app.get('/api/health',async()=>({status:'ok',app:'aventics-worktrack',version:'0.4.0'}));
 app.post('/api/auth/login',async(req,reply)=>{
   if(!['aventics-timesheet','aventics-worktrack'].includes(String(req.headers['x-requested-with']||'')))throw httpError('Invalid request origin',403);
   const input=z.object({username:z.string().min(1).max(64),password:z.string().min(1).max(256)}).parse(req.body);
