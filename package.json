@@ -1,21 +1,23 @@
 {
-  "name": "aventics-work-desk",
-  "version": "0.3.0",
+  "name": "aventics-worktrack",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -k \"npm run dev -w @aventics/timesheet-api\" \"npm run dev -w @aventics/timesheet-web\"",
-    "build": "npm run build -w @aventics/timesheet-web && npm run build -w @aventics/timesheet-api",
-    "start": "npm run start -w @aventics/timesheet-api",
-    "typecheck": "npm run typecheck -w @aventics/timesheet-web && npm run typecheck -w @aventics/timesheet-api",
-    "test": "node --experimental-strip-types --test tests/*.test.mts"
+    "dev": "concurrently -k \"npm run dev -w @aventics/worktrack-api\" \"npm run dev -w @aventics/worktrack-web\"",
+    "build": "npm run build -w @aventics/worktrack-web && npm run build -w @aventics/worktrack-api",
+    "start": "npm run start -w @aventics/worktrack-api",
+    "typecheck": "npm run typecheck -w @aventics/worktrack-web && npm run typecheck -w @aventics/worktrack-api",
+    "test": "node --experimental-strip-types --test tests/*.test.mts",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@playwright/test": "^1.55.0"
   },
   "engines": {
     "node": ">=22"

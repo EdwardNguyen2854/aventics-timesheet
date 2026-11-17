@@ -140,3 +140,60 @@
 .mark-dialog .panel-body{display:grid;gap:14px}
 .mark-dialog label:not(.check-line){display:grid;gap:5px;font-size:11px;font-weight:650}
 .mark-dialog .check-line{display:flex;align-items:center;gap:8px}
+
+/* WorkTrack v0.4 — task workspace and variance dashboard */
+.wt-backdrop{position:fixed;inset:0;z-index:100;background:rgba(18,28,34,.4);display:flex;justify-content:flex-end}
+.wt-task-drawer{height:100%;width:min(680px,100vw);background:#fff;display:flex;flex-direction:column;box-shadow:-8px 0 30px rgba(0,0,0,.15)}
+.wt-drawer-head{padding:20px 22px 16px;border-bottom:1px solid var(--av-line);display:flex;justify-content:space-between;gap:12px;background:#fafbfc}
+.wt-drawer-head small{font-size:9px;color:var(--av-blue);letter-spacing:.13em;font-weight:750}
+.wt-drawer-head h2{font-size:19px;margin:5px 0}.wt-drawer-head p{font-size:11px;margin:0;color:var(--av-muted)}
+.wt-actions{display:flex;gap:8px}.wt-tabs{display:flex;gap:0;border-bottom:1px solid var(--av-line-strong)}
+.wt-tabs button{display:flex;gap:6px;align-items:center;background:transparent;border:0;border-bottom:2px solid transparent;padding:13px 15px;font-size:11px}
+.wt-tabs button.active{border-bottom-color:var(--av-blue);color:var(--av-blue-deep);font-weight:750}
+.wt-drawer-body{overflow:auto;flex:1;padding:20px 22px}.wt-drawer-body h3{font-size:12px;margin:22px 0 10px}
+.wt-detail-list{display:grid;gap:0;border-top:1px solid var(--av-line)}
+.wt-detail-list>div{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:10px 0;border-bottom:1px solid var(--av-line);font-size:11px}
+.wt-detail-list span{color:var(--av-muted);max-width:50%}.wt-detail-list strong{text-align:right;overflow-wrap:anywhere}
+.wt-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.wt-kpi-grid>div{border:1px solid var(--av-line);background:#f8fafb;padding:12px 14px}
+.wt-kpi-grid small{display:block;color:var(--av-muted);font-size:9px;font-weight:650;margin-bottom:8px}
+.wt-kpi-grid strong{font-size:18px;font-variant-numeric:tabular-nums}
+.wt-metric-summary{font-size:11px;padding:12px;background:#eaf5f9;border-left:3px solid var(--av-blue)}
+.wt-analytics{display:grid;gap:14px}.wt-analytics-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
+.wt-variance-row{display:grid;grid-template-columns:170px minmax(140px,1fr) 76px;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #eff1f2}
+.wt-variance-label{display:grid;gap:2px}.wt-variance-label strong{font-size:10px}.wt-variance-label small{font-size:9px;color:var(--av-muted)}
+.wt-variance-track{position:relative;height:25px;background:#f5f7f8}
+.wt-estimate-bar,.wt-actual-bar{position:absolute;left:0;height:8px;max-width:100%;background:#89a4b4}.wt-estimate-bar{top:3px}.wt-actual-bar{top:14px;background:#28a75b}
+.wt-actual-bar.overrun{background:#ca695d}.wt-variance-number{text-align:right;font-size:10px}
+@media(max-width:920px){.wt-analytics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.wt-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.wt-tabs button{padding:11px 6px;font-size:10px}.wt-variance-row{grid-template-columns:110px minmax(80px,1fr) 65px}}
+/* WorkTrack v0.4: two-axis virtualized spreadsheet; only visible date cells and rows are in the DOM. */
+.wt-grid-scroll{height:min(73vh,780px);width:100%;overflow:auto;position:relative;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#8ea79a #eff1f0;background:#fff;outline-offset:-2px}
+.wt-grid-scroll:focus-visible{outline:2px solid var(--av-blue)}.wt-grid-scroll::-webkit-scrollbar{height:14px;width:13px}.wt-grid-scroll::-webkit-scrollbar-thumb{background:#8ea79a;border:3px solid #eff1f0}
+.wt-grid-space{position:relative;min-width:100%}.wt-grid-sticky{position:sticky;top:0;z-index:11;height:96px;background:#fff}
+.wt-grid-header-row,.wt-grid-total-row{position:relative;width:100%}.wt-grid-header-row{height:63px;background:#f1f3f4;border-bottom:1px solid #c5ccd0}.wt-grid-total-row{height:33px;background:#eaf5f8;border-bottom:1px solid #a8c6d3}
+.wt-grid-body-row{position:absolute;left:0;background:#fff;border-bottom:1px solid #dce1e2}
+.wt-meta-col{position:sticky;float:left;display:flex;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 7px;box-sizing:border-box;border-right:1px solid #c4cccf;z-index:4;background:#fff;font-size:10px;line-height:1.25}
+.wt-meta-col:nth-child(3){font-family:var(--av-font-mono)}.wt-meta-col:nth-child(4),.wt-meta-col:nth-child(5){justify-content:center}
+.wt-meta-header{height:63px!important;background:#25313b;color:#fff;font-weight:700}.wt-meta-total{background:#e6f3f8;color:var(--av-blue-deep);font-weight:700}
+.wt-meta-body{height:33px}.wt-task-link{border:0;background:transparent;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-align:left;color:var(--av-blue-deep);font-size:10px;padding:0;text-decoration:underline;text-decoration-color:transparent}.wt-task-link:hover{text-decoration-color:currentColor}
+.wt-day-header{position:absolute;top:0;height:63px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid #cbd1d4;font-size:9px;background:#eef1f2;box-sizing:border-box}.wt-day-header strong{font-size:10px}.wt-day-header small{font-size:8px;color:var(--av-blue)}.wt-day-header.has-hours{background:#d5eedd;color:#175b36}
+.wt-grid-data-cell{position:absolute;top:0;height:33px;display:grid;place-items:center;box-sizing:border-box;border-right:1px solid #e3e7e8;font-size:10px;color:#a7afb4}
+.wt-grid-data-cell.heat-1{background:#edf8f0;color:#225f3c}.wt-grid-data-cell.heat-2{background:#d0ebd7;color:#195b35}.wt-grid-data-cell.heat-3{background:#a8daba;color:#155830}.wt-grid-data-cell.heat-4{background:#75c692;color:#124c2b}.wt-grid-data-cell.heat-5{background:#2f9b5d;color:#fff}
+.wt-grid-data-cell.is-selected{outline:2px solid #007bc0;outline-offset:-2px;z-index:2}.wt-grid-data-cell .wt-hour-button{width:100%;height:100%;background:transparent;border:0;font-size:10px;font-weight:650;color:inherit}.wt-grid-data-cell .wt-hour-button:hover{outline:2px solid #007bc0;outline-offset:-2px;cursor:cell}.wt-grid-data-cell .excel-input{height:31px}.wt-total-cell{font-weight:750}
+
+/* User-specific Task Tracking layouts and column management */
+.wt-column-picker{position:relative}.wt-column-picker summary{cursor:pointer;list-style:none;display:inline-flex}.wt-column-picker summary::-webkit-details-marker{display:none}
+.wt-column-options{position:absolute;top:34px;right:0;width:300px;max-height:410px;overflow:auto;z-index:20;background:#fff;border:1px solid #bdc6ce;box-shadow:0 5px 20px #1b2e3b22;padding:8px}
+.wt-column-option{display:flex;align-items:center;gap:2px;border-bottom:1px solid #e9ecee;min-height:27px}.wt-column-option label{flex:1;font-size:10px;display:flex;align-items:center;gap:6px}.wt-column-option .icon-btn{height:25px;width:25px}
+.tracking-grid.wt-density-comfortable td{height:50px!important;padding-top:10px!important;padding-bottom:10px!important}.tracking-grid.wt-density-comfortable th{height:76px!important}
+/* WorkTrack administration panels */
+.wt-operations{display:grid;gap:16px;margin-top:16px}.wt-operations .panel-header h2{display:flex;align-items:center;gap:8px}.wt-alias-form{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:10px;align-items:end;margin-bottom:16px}.wt-alias-form label{display:grid;gap:6px;font-size:11px;font-weight:650}.wt-alias-form .btn{height:34px}
+@media(max-width:760px){.wt-alias-form{grid-template-columns:1fr}}
+/* WorkTrack administrator operations panels */
+.wt-operations{display:grid;gap:16px;margin-top:16px}.wt-operations .panel-header h2{display:flex;align-items:center;gap:8px}.wt-alias-form{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:10px;align-items:end;margin-bottom:16px}.wt-alias-form label{display:grid;gap:6px;font-size:11px;font-weight:650}.wt-alias-form .btn{height:34px}
+@media(max-width:760px){.wt-alias-form{grid-template-columns:1fr}}
+
+/* Import reconciliation */
+.wt-reconciliation-summary{display:grid;grid-template-columns:repeat(6,minmax(80px,1fr));gap:8px;margin:12px 0}.wt-reconciliation-summary>div{border:1px solid var(--av-line);background:#f8fafb;padding:10px}.wt-reconciliation-summary small{display:block;font-size:9px;color:var(--av-muted)}.wt-reconciliation-summary strong{font-size:19px;font-variant-numeric:tabular-nums}.wt-reconciliation-diffs{padding:10px 0;border-top:1px solid var(--av-line)}.wt-reconciliation-diffs summary{cursor:pointer;font-weight:650;font-size:11px;margin:7px 0}.wt-reconciliation-diffs td{max-width:350px;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:1050px){.wt-reconciliation-summary{grid-template-columns:repeat(3,minmax(80px,1fr))}}

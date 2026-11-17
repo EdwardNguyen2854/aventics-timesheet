@@ -1,6 +1,6 @@
 {
-  "name": "@aventics/timesheet-api",
-  "version": "0.3.0",
+  "name": "@aventics/worktrack-api",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
